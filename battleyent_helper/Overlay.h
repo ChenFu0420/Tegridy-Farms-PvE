@@ -28,6 +28,10 @@ namespace Overlay
 
     // Get game window handle
     HWND GetGameWindow();
+
+    // Render target management
+    void CreateRenderTarget(IDXGISwapChain* pSwapChain);
+    void CleanupRenderTarget();
 }
 
 // Global state

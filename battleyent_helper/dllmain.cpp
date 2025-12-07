@@ -1,84 +1,75 @@
 #include <Windows.h>
 #include <iostream>
 #include <vector>
+#include <string>
 #include <cstdarg>
-#include "il2api.h"
-#include "menu.h"
-#include "features.h"
-#include "DX11Hook.h"
+#include <cstdio>
+#include <mutex>
+#include "Advapi32Patch.h"
 #include "Overlay.h"
+#include "DX11Hook.h"
+#include "Menu.h"
 #include "MenuRenderer.h"
+#include "Features.h"
 
-// ========================================
-// BEService Bypass Patch
-// Reference: RecoverablePatchesAiTeleAndAdvapiSource.txt lines 783-818
-// ========================================
+// =================================================================
+// 0. IL2CPP Structs and Function Type Definitions
+// =================================================================
+typedef void (*Il2CppMethodPointer)();
+struct Il2CppDomain;
+struct Il2CppAssembly;
+struct Il2CppThread;
+struct Il2CppClass;
+struct Il2CppMethod;
+struct Il2CppImage;
+struct Il2CppObject;
+struct Il2CppField;
+struct Il2CppArray;
 
-bool PatchMemory(void* address, const unsigned char* data, size_t size)
-{
-    if (!address || !data) return false;
+// IL2CPP API Function Pointer Type Definitions
+using il2cpp_get_root_domain_prot = Il2CppDomain * (*)();
+static il2cpp_get_root_domain_prot il2cpp_get_root_domain = nullptr;
 
-    DWORD oldProtect;
-    if (!VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return false;
+using il2cpp_thread_attach_prot = Il2CppThread * (*)(Il2CppDomain*);
+static il2cpp_thread_attach_prot il2cpp_thread_attach = nullptr;
 
-    memcpy(address, data, size);
-    VirtualProtect(address, size, oldProtect, &oldProtect);
+using il2cpp_domain_get_assemblies_prot = const Il2CppAssembly** (*)(Il2CppDomain*, size_t*);
+static il2cpp_domain_get_assemblies_prot il2cpp_domain_get_assemblies = nullptr;
 
-    return true;
-}
+using il2cpp_class_from_name_prot = Il2CppClass * (*)(const Il2CppImage*, const char*, const char*);
+il2cpp_class_from_name_prot il2cpp_class_from_name = nullptr;
 
-bool PatchAdvapi32()
-{
-    HMODULE hAdvapi = GetModuleHandleA("Advapi32.dll");
-    if (!hAdvapi)
-    {
-        printf("[-] Failed to get Advapi32.dll handle\n");
-        return false;
-    }
+using il2cpp_class_get_methods_prot = const Il2CppMethod* (*)(Il2CppClass*, void**);
+il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
 
-    FARPROC pOpenServiceA = GetProcAddress(hAdvapi, "OpenServiceA");
-    FARPROC pQueryServiceStatusEx = GetProcAddress(hAdvapi, "QueryServiceStatusEx");
+using il2cpp_method_get_name_prot = const char* (*)(const Il2CppMethod*);
+il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
 
-    if (!pOpenServiceA || !pQueryServiceStatusEx)
-    {
-        printf("[-] Failed to get BEService functions\n");
-        return false;
-    }
+using il2cpp_assembly_get_image_prot = const Il2CppImage* (*)(const Il2CppAssembly*);
+static il2cpp_assembly_get_image_prot il2cpp_assembly_get_image = nullptr;
 
-    // Patch OpenServiceA to always return success (mov al, 1; ret)
-    const unsigned char patchOpenServiceA[] = { 0xB0, 0x01, 0xC3 };
+using il2cpp_image_get_name_prot = const char* (*)(const Il2CppImage*);
+static il2cpp_image_get_name_prot il2cpp_image_get_name = nullptr;
 
-    // Patch QueryServiceStatusEx to set SERVICE_STOPPED and return success
-    const unsigned char patchQueryServiceStatusEx[] = {
-        0x41, 0xC7, 0x40, 0x04, 0x04, 0x00, 0x00, 0x00,  // mov dword ptr [r8+4], 4 (SERVICE_STOPPED)
-        0xB0, 0x01,                                       // mov al, 1
-        0xC3                                              // ret
-    };
+using il2cpp_runtime_invoke_prot = void* (*)(const Il2CppMethod*, void*, void**, void**);
+static il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
 
-    if (!PatchMemory(reinterpret_cast<void*>(pOpenServiceA),
-        patchOpenServiceA,
-        sizeof(patchOpenServiceA)))
-    {
-        printf("[-] Failed to patch OpenServiceA\n");
-        return false;
-    }
+// =================================================================
+// 1. Global Variables
+// =================================================================
+std::vector<const Il2CppMethod*> found_methods;
+std::vector<const Il2CppMethod*> error_screen_methods{};
+std::mutex log_mutex;
 
-    if (!PatchMemory(reinterpret_cast<void*>(pQueryServiceStatusEx),
-        patchQueryServiceStatusEx,
-        sizeof(patchQueryServiceStatusEx)))
-    {
-        printf("[-] Failed to patch QueryServiceStatusEx\n");
-        return false;
-    }
+void* g_TarkovApplicationInstance = nullptr;
+void* g_CameraManagerInstance = nullptr;
+uintptr_t g_selectedLocation = 0;
 
-    printf("[+] BEService bypass patches applied\n");
-    return true;
-}
+#define STATIC_FIELDS_OFFSET 0xB8
 
-// ========================================
-// Present Hook Implementation
-// ========================================
+// =================================================================
+// 2. DX11 Present Hook Implementation
+// =================================================================
 
 HRESULT __stdcall DX11Hook::hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
 {
@@ -102,13 +93,6 @@ HRESULT __stdcall DX11Hook::hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInter
         // Render main menu (only if menu_open)
         MenuRenderer::RenderMainMenu();
 
-        // Render ESP BEFORE ImGui finishes frame
-        // Reference: PlayerESP.cs rendering pattern adapted to ImGui
-        if (Features::ai_esp)
-        {
-            ESPFeatures::RenderPlayerESP();
-        }
-
         Overlay::RenderFrame();
     }
 
@@ -116,38 +100,24 @@ HRESULT __stdcall DX11Hook::hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInter
     return oPresent(pSwapChain, SyncInterval, Flags);
 }
 
-// ========================================
-// IL2CPP Function Pointer Definitions
-// ========================================
+// =================================================================
+// 3. Utility Functions (IL2CPP Helpers)
+// =================================================================
 
-il2cpp_get_root_domain_prot il2cpp_get_root_domain = nullptr;
-il2cpp_thread_attach_prot il2cpp_thread_attach = nullptr;
-il2cpp_domain_get_assemblies_prot il2cpp_domain_get_assemblies = nullptr;
-il2cpp_class_from_name_prot il2cpp_class_from_name = nullptr;
-il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
-il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
-il2cpp_assembly_get_image_prot il2cpp_assembly_get_image = nullptr;
-il2cpp_image_get_name_prot il2cpp_image_get_name = nullptr;
-il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
+// Thread-safe logging
+void log_info(const char* fmt, ...)
+{
+    std::lock_guard<std::mutex> lock(log_mutex);
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    printf("\n");
+    va_end(args);
+}
 
-std::vector<const Il2CppMethod*> found_methods;
-std::vector<const Il2CppMethod*> error_screen_methods{};
-
-void* g_TarkovApplicationInstance = nullptr;
-void* g_CameraManagerInstance = nullptr;
-
-// Raid location tracking
-uintptr_t g_selectedLocation = 0;
-
-// ========================================
-// Static Fields Offset
-// ========================================
-#define STATIC_FIELDS_OFFSET 0xB8
-
-// ========================================
-// Helper Functions
-// ========================================
-
+/**
+ * @brief Find methods by name
+ */
 void find_methods_by_names(Il2CppClass* klass, const std::vector<std::string>& names)
 {
     found_methods.clear();
@@ -171,87 +141,47 @@ void find_methods_by_names(Il2CppClass* klass, const std::vector<std::string>& n
     }
 }
 
+/**
+ * @brief Load IL2CPP image by name
+ */
 Il2CppImage* il2cpp_image_loaded(const char* image_name)
 {
-    size_t assemblyCount;
-    const Il2CppAssembly** assemblies = il2cpp_domain_get_assemblies(il2cpp_get_root_domain(), &assemblyCount);
+    Il2CppDomain* domain = il2cpp_get_root_domain();
+    if (!domain) return nullptr;
 
-    for (size_t i = 0; i < assemblyCount; i++)
+    size_t size = 0;
+    const Il2CppAssembly* const* asmbl = il2cpp_domain_get_assemblies(domain, &size);
+    if (!asmbl) return nullptr;
+
+    for (size_t i = 0; i < size; i++)
     {
-        const Il2CppImage* image = il2cpp_assembly_get_image(assemblies[i]);
-        if (image && strcmp(il2cpp_image_get_name(image), image_name) == 0)
-        {
-            return const_cast<Il2CppImage*>(image);
-        }
+        const Il2CppImage* img = il2cpp_assembly_get_image(asmbl[i]);
+        if (!img) continue;
+
+        const char* nm = il2cpp_image_get_name(img);
+        if (!nm) continue;
+
+        if (_stricmp(nm, image_name) == 0)
+            return (Il2CppImage*)img;
     }
 
     return nullptr;
 }
 
-void* get_tarkov_application_instance(Il2CppClass* tarkovApp)
+/**
+ * @brief Find single IL2CPP method by name
+ */
+const Il2CppMethod* FindMethod(Il2CppClass* klass, const char* methodName)
 {
-    if (!tarkovApp) return nullptr;
+    if (!klass || !methodName) return nullptr;
 
-    void* staticFields = *(void**)((uintptr_t)tarkovApp + STATIC_FIELDS_OFFSET);
-    if (!staticFields) return nullptr;
-
-    for (int i = 0; i < 32; i++)
-    {
-        void** fieldPtr = (void**)((uintptr_t)staticFields + (i * sizeof(void*)));
-        void* candidate = *fieldPtr;
-
-        if (candidate && !IsBadReadPtr(candidate, 8))
-        {
-            void** vtable = *(void***)candidate;
-            if (vtable && !IsBadReadPtr(vtable, 8))
-            {
-                return candidate;
-            }
-        }
-    }
-
-    return nullptr;
-}
-
-void* get_camera_manager_instance(Il2CppImage* image)
-{
-    if (!image) return nullptr;
-
-    Il2CppClass* klass = il2cpp_class_from_name(image, "EFT", "CameraManager");
-    if (!klass) return nullptr;
-
-    void* staticFields = *(void**)((uintptr_t)klass + STATIC_FIELDS_OFFSET);
-    if (!staticFields) return nullptr;
-
-    for (int i = 0; i < 16; i++)
-    {
-        void** fieldPtr = (void**)((uintptr_t)staticFields + (i * sizeof(void*)));
-        void* candidate = *fieldPtr;
-
-        if (candidate && !IsBadReadPtr(candidate, 8))
-        {
-            void** vtable = *(void***)candidate;
-            if (vtable && !IsBadReadPtr(vtable, 8))
-            {
-                return candidate;
-            }
-        }
-    }
-
-    return nullptr;
-}
-
-const Il2CppMethod* wait_for_battleye_init(Il2CppClass* tarkovApp)
-{
-    if (!tarkovApp) return nullptr;
-
-    const Il2CppMethod* method = nullptr;
     void* iter = nullptr;
+    const Il2CppMethod* method;
 
-    while ((method = il2cpp_class_get_methods(tarkovApp, &iter)))
+    while ((method = il2cpp_class_get_methods(klass, &iter)))
     {
         const char* name = il2cpp_method_get_name(method);
-        if (name && strstr(name, "RunValidation"))
+        if (name && strcmp(name, methodName) == 0)
         {
             return method;
         }
@@ -260,24 +190,108 @@ const Il2CppMethod* wait_for_battleye_init(Il2CppClass* tarkovApp)
     return nullptr;
 }
 
-void find_show_error_screen(Il2CppClass* preloaderUI)
+/**
+ * @brief Patch bool getter to return specific value
+ */
+void PatchBoolGetter(void* methodPtr, bool returnValue, unsigned char* savedBytes)
 {
-    error_screen_methods.clear();
-    if (!preloaderUI) return;
+    if (!methodPtr) return;
 
-    void* iter = nullptr;
-    const Il2CppMethod* method;
+    DWORD oldProtect;
+    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
+        return;
 
-    while ((method = il2cpp_class_get_methods(preloaderUI, &iter)))
+    // Save original bytes
+    if (savedBytes)
     {
-        const char* name = il2cpp_method_get_name(method);
-        if (name && strstr(name, "ShowErrorScreen"))
-        {
-            error_screen_methods.push_back(method);
-        }
+        memcpy(savedBytes, methodPtr, 16);
     }
+
+    uint8_t* code = (uint8_t*)methodPtr;
+    code[0] = 0xB0;                 // mov al, imm8
+    code[1] = returnValue ? 1 : 0;
+    code[2] = 0xC3;                 // ret
+
+    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
 }
 
+/**
+ * @brief Restore bool getter original bytes
+ */
+void RestoreBoolGetter(void* methodPtr, unsigned char* savedBytes)
+{
+    if (!methodPtr || !savedBytes) return;
+
+    DWORD oldProtect;
+    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
+        return;
+
+    memcpy(methodPtr, savedBytes, 16);
+
+    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
+}
+
+/**
+ * @brief Patch float getter to return specific value
+ */
+void PatchFloatGetter(void* methodPtr, float returnValue, unsigned char* savedBytes)
+{
+    if (!methodPtr) return;
+
+    DWORD oldProtect;
+    if (!VirtualProtect(methodPtr, 32, PAGE_EXECUTE_READWRITE, &oldProtect))
+        return;
+
+    // Save original bytes
+    if (savedBytes)
+    {
+        memcpy(savedBytes, methodPtr, 16);
+    }
+
+    static float forced_value = 0.0f;
+    forced_value = returnValue;
+
+    uint8_t stub[32];
+    memset(stub, 0x90, sizeof(stub));
+    stub[0] = 0x48;
+    stub[1] = 0xB8;
+    uint64_t addr = (uint64_t)&forced_value;
+    memcpy(&stub[2], &addr, sizeof(addr));
+    int idx = 2 + (int)sizeof(addr);
+    stub[idx++] = 0xF3;
+    stub[idx++] = 0x0F;
+    stub[idx++] = 0x10;
+    stub[idx++] = 0x00;
+    stub[idx++] = 0xC3;
+
+    memcpy(methodPtr, stub, idx);
+
+    VirtualProtect(methodPtr, 32, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), methodPtr, 32);
+}
+
+/**
+ * @brief Restore float getter original bytes
+ */
+void RestoreFloatGetter(void* methodPtr, unsigned char* savedBytes)
+{
+    if (!methodPtr || !savedBytes) return;
+
+    DWORD oldProtect;
+    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
+        return;
+
+    memcpy(methodPtr, savedBytes, 16);
+
+    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
+    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
+}
+
+/**
+ * @brief Safe version with waiting
+ */
 void patch_method_ret_safe(const Il2CppMethod* method)
 {
     if (!method) return;
@@ -292,44 +306,138 @@ void patch_method_ret_safe(const Il2CppMethod* method)
     if (VirtualProtect(fn, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
     {
         uint8_t* code = (uint8_t*)fn;
-        code[0] = 0xC3; // RET
+        code[0] = 0xC3;
         VirtualProtect(fn, 16, oldProtect, &oldProtect);
     }
 }
 
-// ========================================
-// Main Start Function
-// ========================================
+// =================================================================
+// 4. BattlEye Functions
+// =================================================================
+
+const Il2CppMethod* find_battleye_init(Il2CppClass* main_application)
+{
+    if (!main_application) return nullptr;
+
+    void* iter = nullptr;
+    const Il2CppMethod* method;
+
+    while ((method = il2cpp_class_get_methods(main_application, &iter)))
+    {
+        const char* name = il2cpp_method_get_name(method);
+        if (!name) continue;
+
+        // Check for obfuscated name
+        if ((unsigned char)name[0] == 0xEE &&
+            (unsigned char)name[1] == 0x80 &&
+            (unsigned char)name[2] == 0x81)
+            return method;
+
+        // Check for plain text name
+        if (strcmp(name, "ValidateAnticheat") == 0)
+            return method;
+    }
+
+    return nullptr;
+}
+
+const Il2CppMethod* wait_for_battleye_init(Il2CppClass* main_application)
+{
+    const Il2CppMethod* method = nullptr;
+    while (!(method = find_battleye_init(main_application)))
+        Sleep(200);
+    return method;
+}
+
+void find_show_error_screen(Il2CppClass* preloader_ui)
+{
+    error_screen_methods.clear();
+
+    void* iter = nullptr;
+    const Il2CppMethod* method;
+
+    while ((method = il2cpp_class_get_methods(preloader_ui, &iter)))
+    {
+        const char* name = il2cpp_method_get_name(method);
+        if (!name) continue;
+
+        if (strcmp(name, "ShowErrorScreen") == 0)
+        {
+            error_screen_methods.push_back(method);
+        }
+    }
+}
+
+// =================================================================
+// 5. Game Instance Functions
+// =================================================================
+
+void* get_tarkov_application_instance(Il2CppClass* klass)
+{
+    uintptr_t static_fields_ptr = *(uintptr_t*)((uintptr_t)klass + STATIC_FIELDS_OFFSET);
+    if (!static_fields_ptr) return nullptr;
+
+    uintptr_t* static_fields = (uintptr_t*)static_fields_ptr;
+    for (int i = 0; i < 32; i++)
+    {
+        uintptr_t candidate = static_fields[i];
+        if (!candidate) continue;
+
+        Il2CppClass* objClass = *(Il2CppClass**)candidate;
+        if (objClass == klass)
+            return (void*)candidate;
+    }
+
+    return nullptr;
+}
+
+void* get_camera_manager_instance(Il2CppImage* image)
+{
+    auto cameraManagerClass = il2cpp_class_from_name(image, "EFT.CameraControl", "CameraManager");
+    if (!cameraManagerClass) return nullptr;
+
+    uintptr_t static_fields_ptr = *(uintptr_t*)((uintptr_t)cameraManagerClass + STATIC_FIELDS_OFFSET);
+    if (!static_fields_ptr) return nullptr;
+
+    uintptr_t* static_fields = (uintptr_t*)static_fields_ptr;
+    for (int i = 0; i < 16; i++)
+    {
+        uintptr_t candidate = static_fields[i];
+        if (!candidate) continue;
+
+        Il2CppClass* objClass = *(Il2CppClass**)candidate;
+        if (objClass == cameraManagerClass)
+            return (void*)candidate;
+    }
+
+    return nullptr;
+}
+
+// =================================================================
+// 6. Main Execution
+// =================================================================
 
 void start()
 {
-    // Allocate console for logging
     AllocConsole();
     FILE* fp;
     freopen_s(&fp, "CONOUT$", "w", stdout);
-    freopen_s(&fp, "CONOUT$", "w", stderr);
 
     printf("========================================\n");
     printf("  Tegridy Farms - PvE Bypass\n");
-    printf("  Version: 1.0\n");
+    printf("  Version: 1.0.0.2.42157\n");
     printf("========================================\n\n");
-    printf("[+] BEService bypass applied in DllMain\n\n");
+    printf("[+] Thread-freezing Advapi32 patches applied successfully\n\n");
 
-    // ========================================
-    // Step 1: Wait for GameAssembly.dll
-    // ========================================
-    printf("[*] Step 1: Waiting for GameAssembly.dll...\n");
+    // Initialize IL2CPP
+    printf("[*] Step 1: Initializing IL2CPP...\n");
+
     HMODULE il2cpp = nullptr;
     while (!(il2cpp = GetModuleHandleA("GameAssembly.dll")))
-    {
         Sleep(2000);
-    }
-    printf("[+] GameAssembly.dll loaded at 0x%llX\n\n", (uintptr_t)il2cpp);
+    printf("[+] GameAssembly.dll Found\n");
 
-    // ========================================
-    // Step 2: Load IL2CPP APIs
-    // ========================================
-    printf("[*] Step 2: Loading IL2CPP APIs...\n");
+    // Resolve IL2CPP functions
     il2cpp_get_root_domain = (il2cpp_get_root_domain_prot)GetProcAddress(il2cpp, "il2cpp_domain_get");
     il2cpp_thread_attach = (il2cpp_thread_attach_prot)GetProcAddress(il2cpp, "il2cpp_thread_attach");
     il2cpp_domain_get_assemblies = (il2cpp_domain_get_assemblies_prot)GetProcAddress(il2cpp, "il2cpp_domain_get_assemblies");
@@ -340,150 +448,115 @@ void start()
     il2cpp_image_get_name = (il2cpp_image_get_name_prot)GetProcAddress(il2cpp, "il2cpp_image_get_name");
     il2cpp_runtime_invoke = (il2cpp_runtime_invoke_prot)GetProcAddress(il2cpp, "il2cpp_runtime_invoke");
 
-    if (!il2cpp_get_root_domain || !il2cpp_thread_attach || !il2cpp_domain_get_assemblies)
-    {
-        printf("[-] Failed to load IL2CPP APIs\n");
-        return;
-    }
-    printf("[+] IL2CPP APIs loaded successfully\n\n");
-
-    // Wait for IL2CPP to fully initialize
     Sleep(15000);
 
-    // ========================================
-    // Step 3: Attach to IL2CPP Domain
-    // ========================================
-    printf("[*] Step 3: Attaching to IL2CPP domain...\n");
     Il2CppDomain* domain = il2cpp_get_root_domain();
-    if (!domain)
-    {
-        printf("[-] Failed to get IL2CPP root domain\n");
-        return;
-    }
     il2cpp_thread_attach(domain);
-    printf("[+] Attached to IL2CPP domain\n\n");
+    printf("[+] Attached to IL2CPP domain\n");
 
     Sleep(1000);
 
-    // ========================================
-    // Step 4: Wait for Assembly-CSharp.dll
-    // ========================================
-    printf("[*] Step 4: Waiting for Assembly-CSharp.dll...\n");
+    // Find Assembly-CSharp
+    printf("\n[*] Step 2: Loading Assembly-CSharp...\n");
+
     Il2CppImage* image = nullptr;
     while (!(image = il2cpp_image_loaded("Assembly-CSharp.dll")))
-    {
         Sleep(2000);
-    }
-    printf("[+] Assembly-CSharp.dll loaded\n\n");
+    printf("[+] Assembly-CSharp.dll Found\n");
 
     Sleep(1000);
 
-    // ========================================
-    // Step 5: Find TarkovApplication Class
-    // ========================================
-    printf("[*] Step 5: Finding TarkovApplication class...\n");
-    Il2CppClass* tarkovApp = il2cpp_class_from_name(image, "EFT", "TarkovApplication");
+    // Patch BattlEye
+    printf("\n[*] Step 3: Patching BattlEye initialization...\n");
+
+    auto tarkovApp = il2cpp_class_from_name(image, "EFT", "TarkovApplication");
     if (!tarkovApp)
     {
-        printf("[-] TarkovApplication class not found\n");
+        printf("[-] TarkovApplication Not Found\n");
         return;
     }
-    printf("[+] TarkovApplication class found\n\n");
+    printf("[+] TarkovApplication Found\n");
 
     Sleep(1000);
 
-    // ========================================
-    // Step 6: Patch BattlEye Initialization
-    // ========================================
-    printf("[*] Step 6: Patching BattlEye initialization...\n");
     const Il2CppMethod* battleyeMethod = wait_for_battleye_init(tarkovApp);
     if (battleyeMethod)
     {
         patch_method_ret_safe(battleyeMethod);
-        printf("[+] BattlEye init method patched\n");
-    }
-    else
-    {
-        printf("[-] BattlEye init method not found\n");
+        printf("[+] Battleye init patched\n");
     }
 
-    // Try to unload BEClient if it's loaded
-    HMODULE beclient = GetModuleHandleA("BEClient_x64.dll");
-    if (beclient)
-    {
-        FreeLibrary(beclient);
-        printf("[+] BEClient_x64.dll unloaded\n");
-    }
-    printf("\n");
+    printf("[+] BEClient_x64.dll prevented from loading via Advapi32 bypass\n");
 
     Sleep(1000);
 
-    // ========================================
-    // Step 7: Patch Error Screens
-    // ========================================
-    printf("[*] Step 7: Patching error screens...\n");
-    Il2CppClass* preloaderUI = il2cpp_class_from_name(image, "EFT.UI", "PreloaderUI");
+    // Patch error screen
+    printf("\n[*] Step 4: Patching error screen...\n");
+
+    auto preloaderUI = il2cpp_class_from_name(image, "EFT.UI", "PreloaderUI");
     if (preloaderUI)
     {
         find_show_error_screen(preloaderUI);
-        for (auto method : error_screen_methods)
+        for (auto m : error_screen_methods)
         {
-            patch_method_ret_safe(method);
+            patch_method_ret_safe(m);
+            printf("[+] ShowErrorScreen --> Patched\n");
         }
-        printf("[+] Error screens patched\n");
     }
-    printf("\n");
 
-    // ========================================
-    // Step 8: Initialize DX11 Hook for ImGui Overlay
-    // ========================================
-    printf("[*] Step 8: Initializing DX11 hook for overlay...\n");
-    Sleep(10000);
+    Sleep(1000);
+
+    // Initialize all feature patches (create them, don't enable yet)
+    printf("\n[*] Step 5: Initializing feature patches...\n");
+    FeaturePatch::InitializeAllPatches(image);
+
+    Sleep(1000);
+
+    // Initialize DX11 Hook
+    printf("\n[*] Step 6: Initializing DX11 hook for ImGui...\n");
+    Sleep(5000);
 
     if (DX11Hook::Initialize())
     {
-        printf("[+] DX11 hook ready\n");
+        printf("[+] DX11 hook initialized\n");
     }
     else
     {
         printf("[-] Failed to initialize DX11 hook\n");
     }
-    printf("\n");
 
-    // ========================================
-    // Ready Banner
-    // ========================================
-    printf("========================================\n");
-    printf("  Tegridy Farms - Ready!\n");
+    Sleep(1000);
+
+    // Complete
+    printf("\n========================================\n");
+    printf("  All patches applied successfully!\n");
     printf("========================================\n\n");
-    printf("Controls:\n");
-    printf("  INSERT - Toggle menu\n");
-    printf("  END    - Emergency exit\n\n");
-    printf("[*] Scanning for TarkovApplication + CameraManager...\n\n");
+    printf("[SUCCESS] You can now play offline PVE\n");
+    printf("[INFO] Press INSERT to open menu\n");
+    printf("[INFO] Press END key to terminate safely\n\n");
 
-    // ========================================
-    // Main Loop - Monitor and Apply Patches
-    // ========================================
-    bool patchesApplied = false;
-    float nextRaidUpdateTime = 0.0f;
-    const float raidUpdateInterval = 2.0f; // Check raid location every 2 seconds
+    printf("[*] Scanning for game instances...\n\n");
 
-    while (true)
+    // Main loop
+    bool patchesInitialized = false;
+
+    // Track previous feature states for change detection
+    bool prev_god_mode = false;
+    bool prev_infinite_stamina = false;
+    bool prev_no_recoil = false;
+    bool prev_no_weapon_durability = false;
+    bool prev_no_weapon_malfunction = false;
+    bool prev_no_weapon_overheating = false;
+    bool prev_ai_not_attack = false;
+    bool prev_breach_all_doors = false;
+    bool prev_lucky_search = false;
+
+    while (!(GetAsyncKeyState(VK_END) & 0x8000))
     {
-        // Check menu input
+        // Check menu input (INSERT key)
         Menu::CheckInput();
 
-        // Check for END key press (panic key)
-        if (GetAsyncKeyState(VK_END) & 0x8000)
-        {
-            printf("\n[!] END key detected - Initiating safe shutdown...\n");
-            Sleep(500);
-            printf("[*] Terminating game process...\n");
-            TerminateProcess(GetCurrentProcess(), 0);
-            return;
-        }
-
-        // Track instances
+        // Track TarkovApplication instance
         if (!g_TarkovApplicationInstance)
         {
             g_TarkovApplicationInstance = get_tarkov_application_instance(tarkovApp);
@@ -493,138 +566,118 @@ void start()
             }
         }
 
+        // Track CameraManager instance
         void* cm = get_camera_manager_instance(image);
         if (cm && cm != g_CameraManagerInstance)
         {
             g_CameraManagerInstance = cm;
+            printf("[+] CameraManager = 0x%llX\n", (uintptr_t)g_CameraManagerInstance);
         }
-
-        // Track previous feature states to detect changes
-        static bool prev_god_mode = false;
-        static bool prev_infinite_stamina = false;
-        static bool prev_no_fall_damage = false;
-        static bool prev_no_energy_drain = false;
-        static bool prev_no_hydration_drain = false;
-        static bool prev_no_fatigue = false;
-        static bool prev_no_environment_damage = false;
-        static bool prev_breach_all_doors = false;
-        static bool prev_instant_search = false;
-        static bool prev_ai_ignore = false;
-        static bool prev_no_recoil = false;
-        static bool prev_no_weapon_durability = false;
-        static bool prev_no_weapon_malfunction = false;
-        static bool prev_no_weapon_overheating = false;
 
         // Check if any feature toggle has changed
         bool featuresChanged =
             (Features::god_mode != prev_god_mode) ||
             (Features::infinite_stamina != prev_infinite_stamina) ||
-            (Features::no_fall_damage != prev_no_fall_damage) ||
-            (Features::no_energy_drain != prev_no_energy_drain) ||
-            (Features::no_hydration_drain != prev_no_hydration_drain) ||
-            (Features::no_fatigue != prev_no_fatigue) ||
-            (Features::no_environment_damage != prev_no_environment_damage) ||
-            (Features::breach_all_doors != prev_breach_all_doors) ||
-            (Features::instant_search != prev_instant_search) ||
-            (Features::ai_ignore != prev_ai_ignore) ||
             (Features::no_recoil != prev_no_recoil) ||
             (Features::no_weapon_durability != prev_no_weapon_durability) ||
             (Features::no_weapon_malfunction != prev_no_weapon_malfunction) ||
-            (Features::no_weapon_overheating != prev_no_weapon_overheating);
+            (Features::no_weapon_overheating != prev_no_weapon_overheating) ||
+            (Features::ai_not_attack != prev_ai_not_attack) ||
+            (Features::breach_all_doors != prev_breach_all_doors) ||
+            (Features::lucky_search != prev_lucky_search);
 
-        // Apply features only when CameraManager exists and (first time OR features changed)
-        if (cm && (!patchesApplied || featuresChanged))
+        // Apply features when CameraManager exists and (first time OR features changed)
+        if (cm && (!patchesInitialized || featuresChanged))
         {
-            if (!patchesApplied)
+            if (!patchesInitialized)
             {
-                printf("[*] Game ready - applying feature patches...\n");
-            }
-            else if (featuresChanged)
-            {
-                printf("[*] Feature toggle changed - reapplying patches...\n");
+                printf("[*] Game ready - features can now be toggled via menu\n");
+                patchesInitialized = true;
             }
 
+            // Apply all enabled features
             FeaturePatch::ApplyAllEnabledFeatures(image);
 
             // Update previous states
             prev_god_mode = Features::god_mode;
             prev_infinite_stamina = Features::infinite_stamina;
-            prev_no_fall_damage = Features::no_fall_damage;
-            prev_no_energy_drain = Features::no_energy_drain;
-            prev_no_hydration_drain = Features::no_hydration_drain;
-            prev_no_fatigue = Features::no_fatigue;
-            prev_no_environment_damage = Features::no_environment_damage;
-            prev_breach_all_doors = Features::breach_all_doors;
-            prev_instant_search = Features::instant_search;
-            prev_ai_ignore = Features::ai_ignore;
             prev_no_recoil = Features::no_recoil;
             prev_no_weapon_durability = Features::no_weapon_durability;
             prev_no_weapon_malfunction = Features::no_weapon_malfunction;
             prev_no_weapon_overheating = Features::no_weapon_overheating;
-
-            if (!patchesApplied)
-            {
-                patchesApplied = true;
-                printf("\n[+] Patches Applied\n\n");
-            }
+            prev_ai_not_attack = Features::ai_not_attack;
+            prev_breach_all_doors = Features::breach_all_doors;
+            prev_lucky_search = Features::lucky_search;
         }
 
-        // Update raid/SelectedLocation periodically (every 2 seconds)
-        float currentTime = GetTickCount64() / 1000.0f;
-        if (currentTime >= nextRaidUpdateTime)
+        // Continuous updates (run every frame)
+        if (cm)
         {
-            FeaturePatch::UpdateRaidSelectedLocation(image);
-            nextRaidUpdateTime = currentTime + raidUpdateInterval;
+            FeaturePatch::UpdateGodMode();
         }
 
-        // Update god mode (continuously set damage coefficient if enabled)
-        // This runs every frame (100ms) to maintain invulnerability
-        FeaturePatch::UpdateGodMode(image);
+        // Update offline PVE (every frame, but only writes when location changes)
+        FeaturePatch::UpdateOfflinePVE();
 
-        // Update thermal/NVG (continuous write to ThermalVision struct)
-        // Reference: ThermalNvgSource.txt
-        if (cm && (Features::night_vision || Features::thermal_vision))
-        {
-            ThermalVision::UpdateThermalNVG();
-        }
-
-        // Update AI ESP data (scan players, calculate screen positions)
-        // Reference: PlayerESP.cs UpdatePlayerESP pattern
-        if (cm && Features::ai_esp)
-        {
-            ESPFeatures::UpdatePlayerESP(image);
-        }
-
-        // Print CameraManager at bottom for easy copy/paste to CE
-        // This runs after all updates so it stays at bottom of console
-        static uintptr_t lastPrintedCM = 0;
-        if (cm && (uintptr_t)cm != lastPrintedCM)
+        // Print CameraManager periodically for CE debugging
+        static DWORD lastPrintTime = 0;
+        DWORD currentTime = GetTickCount();
+        if (cm && (currentTime - lastPrintTime) > 10000) // Every 10 seconds
         {
             printf("\n========================================\n");
             printf("[CM] CameraManager = 0x%llX (copy for CE)\n", (uintptr_t)cm);
             printf("========================================\n\n");
-            lastPrintedCM = (uintptr_t)cm;
+            lastPrintTime = currentTime;
         }
 
         Sleep(100);
     }
+
+    // END key pressed
+    printf("\n[!] END key detected - terminating process...\n");
+    printf("[!] No telemetry will be sent.\n");
+    Sleep(1000);
+
+    TerminateProcess(GetCurrentProcess(), 0);
 }
+
+// =================================================================
+// 7. DLL Entry Point
+// =================================================================
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls(hModule);
-        
-        // Patch Advapi32 immediately (CRITICAL - must be before CreateThread)
-        // Reference: RecoverablePatchesAiTeleAndAdvapiSource.txt lines 1289-1293
-        if (!PatchAdvapi32())
+
+        // ========================================
+        // CRITICAL: Apply thread-freezing BEService bypass
+        // ========================================
+
+        if (!Advapi32Patch::PerformPreInjectionChecks())
         {
-            return FALSE; // Fail DLL load if BEService patch fails
+            // Show error message to user
+            MessageBoxA(NULL,
+                "BEService bypass failed!\n\n"
+                "The injection has been aborted for safety.\n"
+                "This prevents potential detection by BattlEye.\n\n"
+                "Possible reasons:\n"
+                "1. BattlEye is already active\n"
+                "2. BEClient_x64.dll is already loaded\n"
+                "3. Thread-freezing patch failed\n\n"
+                "Try restarting the game and injecting again.",
+                "Tegridy Farms - Injection Failed",
+                MB_ICONERROR | MB_OK);
+
+            return FALSE;  // Abort injection completely
         }
-        
-        // Start main thread
+
+        printf("[SECURITY] All safety checks passed - starting main cheat thread\n");
+
+        // Start main thread only if bypass succeeded
         CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)start, nullptr, 0, nullptr);
     }
+
     return TRUE;
 }

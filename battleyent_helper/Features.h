@@ -1,170 +1,92 @@
 #pragma once
-#include "il2api.h"
+#include <Windows.h>
 #include <vector>
 #include <string>
-#include <unordered_map>
+
+// Forward declarations
+struct Il2CppImage;
+struct Il2CppMethod;
+struct Il2CppClass;
+
+// ========================================
+// Feature Toggle States
+// These will be modified by ImGui checkboxes
+// ========================================
+namespace Features
+{
+    // Toggleable features
+    extern bool god_mode;
+    extern bool infinite_stamina;
+    extern bool no_recoil;
+    extern bool no_weapon_durability;
+    extern bool no_weapon_malfunction;
+    extern bool no_weapon_overheating;
+    extern bool ai_not_attack;
+    extern bool breach_all_doors;
+    extern bool lucky_search;
+
+    // Menu state
+    extern bool menu_open;
+}
 
 // ========================================
 // Recoverable Patch System
-// Reference: RecoverablePatchesAiTeleAndAdvapiSource.txt
+// Reference: Truth source patch_method_ret_recoverable/unpatch_method_ret
 // ========================================
 namespace PatchSystem
 {
-    struct PatchBackup {
-        void* address;
-        std::vector<uint8_t> originalBytes;
-        std::vector<uint8_t> patchedBytes;
+    struct PatchData
+    {
+        const Il2CppMethod* method;
+        void* functionPtr;
+        unsigned char originalBytes[16];
         bool isPatched;
-        std::string featureName;
+        std::string name;
     };
 
-    extern std::unordered_map<std::string, PatchBackup> g_patchBackups;
+    // Storage for all patches
+    extern std::vector<PatchData> g_patches;
 
-    // Core patch functions
-    void CreatePatch(const char* name, void* address, const std::vector<uint8_t>& patchBytes);
-    void EnablePatch(const char* name);
-    void DisablePatch(const char* name);
+    // Create a recoverable patch (saves original bytes, doesn't apply yet)
+    bool CreatePatch(const char* name, const Il2CppMethod* method);
+
+    // Enable patch (write 0xC3)
+    bool EnablePatch(const char* name);
+
+    // Disable patch (restore original bytes)
+    bool DisablePatch(const char* name);
+
+    // Check if patch is currently enabled
     bool IsPatched(const char* name);
 
-    // Convenience functions for common patches
-    void CreateRETPatch(const char* name, const Il2CppMethod* method);
-    void CreateBoolGetterPatch(const char* name, void* methodPtr, bool returnValue);
-    void CreateFloatGetterPatch(const char* name, void* methodPtr, float returnValue);
+    // Find patch by name
+    PatchData* FindPatch(const char* name);
 }
 
 // ========================================
 // Feature Patch Functions
+// Each function checks Features:: toggle and enables/disables accordingly
 // ========================================
 namespace FeaturePatch
 {
-    // ========================================
-    // Player Features
-    // ========================================
+    // Initialize all patches (create them, don't enable yet)
+    void InitializeAllPatches(Il2CppImage* image);
+
+    // Apply/unapply based on current toggle states
     void ApplyGodMode(Il2CppImage* image);
     void ApplyInfiniteStamina(Il2CppImage* image);
-    void ApplyNoFallDamage(Il2CppImage* image);
-    void ApplyNoEnergyDrain(Il2CppImage* image);
-    void ApplyNoHydrationDrain(Il2CppImage* image);
-    void ApplyNoFatigue(Il2CppImage* image);
-    void ApplyNoEnvironmentDamage(Il2CppImage* image); // Combined: barbed wire + mines + sniper zones
-    void ApplyBreachAllDoors(Il2CppImage* image);
-    void ApplyInstantSearch(Il2CppImage* image);
-    void ApplyAIIgnore(Il2CppImage* image); // Combined: AI tracking + AI attacks
-
-    // ========================================
-    // Combat Features (kept for backwards compat, not used in new menu)
-    // ========================================
     void ApplyNoRecoil(Il2CppImage* image);
     void ApplyNoWeaponDurability(Il2CppImage* image);
     void ApplyNoWeaponMalfunction(Il2CppImage* image);
     void ApplyNoWeaponOverheating(Il2CppImage* image);
+    void ApplyAINotAttack(Il2CppImage* image);
+    void ApplyBreachAllDoors(Il2CppImage* image);
+    void ApplyLuckySearch(Il2CppImage* image);
 
-    // ========================================
-    // Master Function - Apply All Enabled Features
-    // ========================================
+    // Master function - checks all toggles and applies changes
     void ApplyAllEnabledFeatures(Il2CppImage* image);
 
-    // ========================================
-    // Continuous Update Functions (run in main loop)
-    // ========================================
-    void UpdateRaidSelectedLocation(Il2CppImage* image);
-    void UpdateGodMode(Il2CppImage* image);
-    void UpdateThermalNVG(); // Reference: ThermalNvgSource.txt
-}
-
-// ========================================
-// Visual Features
-// Reference: ThermalNvgSource.txt, PlayerESP.cs
-// ========================================
-namespace ThermalVision
-{
-    void UpdateThermalNVG();
-}
-
-namespace ESPFeatures
-{
-    struct Vector3 {
-        float x, y, z;
-    };
-
-    struct ESPPlayer {
-        void* playerPtr;
-        Vector3 worldPos;
-        Vector3 headWorldPos;
-        Vector3 screenPos;
-        Vector3 headScreenPos;
-        std::string name;
-        float distance;
-        bool isAI;
-        bool isBoss;
-        bool isOnScreen;
-    };
-
-    extern std::vector<ESPPlayer> espPlayers;
-
-    void UpdatePlayerESP(Il2CppImage* image);
-    void RenderPlayerESP(); // Called from Overlay.cpp
-
-    // Helper functions
-    Vector3 WorldToScreen(Vector3 worldPos);
-    bool IsScreenPointVisible(Vector3 screenPoint);
-    Vector3 GetPlayerPosition(void* player);
-    Vector3 GetPlayerHeadPosition(void* player);
-    bool IsPlayerAI(void* player);
-    bool IsPlayerBoss(void* player);
-    std::string GetPlayerName(void* player);
-}
-
-// ========================================
-// Loot Features
-// Reference: Main.cs, LuaCheatEngineTable.txt, NewLuaOffsets.txt
-// ========================================
-namespace ItemDuping
-{
-    struct BackpackItem {
-        void* itemPtr;
-        std::string name;
-        uintptr_t stackAddress;
-        int currentStack;
-    };
-
-    extern std::vector<BackpackItem> scannedItems;
-    extern int selectedIndex;
-
-    void ScanBackpack();
-    void DupeSelectedItem();
-    void SetStackAmount(int amount);
-    
-    // Helper
-    void ReadIL2CPPString(uintptr_t stringPtr, char* buffer, size_t maxLen);
-}
-
-// ========================================
-// AI Features
-// Reference: RecoverablePatchesAiTeleAndAdvapiSource.txt, NewLuaOffsets.txt
-// ========================================
-namespace AIFeatures
-{
-    struct WaveData {
-        int spawnID;
-        int countMin;
-        int countMax;
-        int timeMin;
-        int timeMax;
-    };
-
-    extern WaveData waveEditor[8];
-
-    void TeleportAllAI();
-    void ApplyWaveEdits();
-}
-
-// ========================================
-// Patch Helper Functions (legacy support)
-// ========================================
-namespace PatchHelpers
-{
-    void PatchMethodsWithLogging(Il2CppClass* klass, const char* namespaceName, const char* className, const std::vector<std::string>& methodNames);
-    void PatchBoolGetter(void* methodPtr, bool returnValue);
-    void PatchFloatGetter(void* methodPtr, float returnValue);
+    // Continuous updates (run every frame)
+    void UpdateGodMode();  // God mode uses continuous memory write, not patch
+    void UpdateOfflinePVE();  // Force offline PVE raid
 }
