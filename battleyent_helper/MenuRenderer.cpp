@@ -21,7 +21,6 @@ namespace MenuRenderer
             ImGuiWindowFlags_NoInputs |
             ImGuiWindowFlags_NoBackground);
 
-        ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), "Tegridy Farms");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.7f), "INSERT - Toggle Menu");
         ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 0.7f), "END - Exit Game");
 
@@ -41,7 +40,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Invincibility - no damage taken");
+            ImGui::SetTooltip("No DMG, No Fall DMG, No Environment DMG, No Thirst, No Hunger, No Fatigue.");
         }
 
         // Infinite Stamina
@@ -53,7 +52,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Never run out of stamina");
+            ImGui::SetTooltip("Crackhead energy, limitless.");
         }
 
         ImGui::Spacing();
@@ -69,19 +68,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Open any door without keys");
-        }
-
-        // Lucky Search
-        if (ImGui::Checkbox("Lucky Search", &Features::lucky_search))
-        {
-            printf("[TOGGLE] Lucky Search: %s\n", Features::lucky_search ? "ON" : "OFF");
-        }
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Instantly search whatever you open.");
+            ImGui::SetTooltip("Kick down all doors like they do in the FBI.");
         }
 
         ImGui::EndChild();
@@ -100,7 +87,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Eliminate weapon recoil");
+            ImGui::SetTooltip("Pretty self explanatory.");
         }
 
         // No Weapon Durability
@@ -112,7 +99,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Weapons never lose durability");
+            ImGui::SetTooltip("Pretty self explanatory.");
         }
 
         // No Weapon Malfunction
@@ -124,7 +111,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Weapons never jam");
+            ImGui::SetTooltip("Pretty self explanatory.");
         }
 
         // No Weapon Overheating
@@ -136,7 +123,7 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Weapons never overheat");
+            ImGui::SetTooltip("Ice ice baby.");
         }
 
         ImGui::EndChild();
@@ -155,14 +142,126 @@ namespace MenuRenderer
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("AI cannot see or attack you");
+            ImGui::SetTooltip("AI cannot see or attack you.");
         }
 
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Additional AI features coming soon...");
+        // Teleport AI to Me button
+        if (ImGui::Button("Teleport AI"))
+        {
+            FeaturePatch::TeleportAllEnemiesToMe();
+            printf("[ACTION] Teleport AI triggered\n");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Teleport all AI to your location.");
+        }
+
+        ImGui::EndChild();
+    }
+
+    void RenderVisualTab()
+    {
+        ImGui::BeginChild("VisualTab", ImVec2(0, 0), false);
+
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Visual Features (Coming Soon)");
+        ImGui::Spacing();
+
+        // Planned features (disabled)
+        ImGui::BeginDisabled();
+
+        ImGui::Checkbox("Thermal Vision", &Features::thermal_vision);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Pretty self explanatory.");
+        }
+
+        ImGui::Checkbox("Night Vision", &Features::night_vision);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Pretty self explanatory.");
+        }
+
+        ImGui::Checkbox("Player ESP", &Features::player_esp);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("See PMCs, Scavs, Bosses through walls.");
+        }
+
+        ImGui::Checkbox("Loot ESP", &Features::loot_esp);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("See valuable loot through walls");
+        }
+
+        if (Features::loot_esp)
+        {
+            ImGui::Indent();
+            ImGui::SliderFloat("Min Item Value", &Features::loot_esp_min_value, 1000.0f, 100000.0f, "%.0f");
+            ImGui::Unindent();
+        }
+
+        ImGui::EndDisabled();
+
+        ImGui::EndChild();
+    }
+
+    void RenderLootTab()
+    {
+        ImGui::BeginChild("LootTab", ImVec2(0, 0), false);
+
+        // Lucky Search (moved from Player tab)
+        if (ImGui::Checkbox("Lucky Search", &Features::lucky_search))
+        {
+            printf("[TOGGLE] Lucky Search: %s\n", Features::lucky_search ? "ON" : "OFF");
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Instantly search whatever you open.");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Additional Features (Coming Soon)");
+        ImGui::Spacing();
+
+        // Planned features (disabled)
+        ImGui::BeginDisabled();
+
+        ImGui::Checkbox("Item Spawner", &Features::item_spawner);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Spawn items. (Coming Soon)");
+        }
+
+        ImGui::Checkbox("Loot Vacuum", &Features::loot_vacuum);
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Teleport nearby loot to your position. (Coming Soon)");
+        }
+
+        ImGui::EndDisabled();
 
         ImGui::EndChild();
     }
@@ -198,6 +297,18 @@ namespace MenuRenderer
                 if (ImGui::BeginTabItem("AI"))
                 {
                     RenderAITab();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("VISUAL"))
+                {
+                    RenderVisualTab();
+                    ImGui::EndTabItem();
+                }
+
+                if (ImGui::BeginTabItem("LOOT"))
+                {
+                    RenderLootTab();
                     ImGui::EndTabItem();
                 }
 

@@ -40,10 +40,10 @@ using il2cpp_class_from_name_prot = Il2CppClass * (*)(const Il2CppImage*, const 
 il2cpp_class_from_name_prot il2cpp_class_from_name = nullptr;
 
 using il2cpp_class_get_methods_prot = const Il2CppMethod* (*)(Il2CppClass*, void**);
-static il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
+il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
 
 using il2cpp_method_get_name_prot = const char* (*)(const Il2CppMethod*);
-static il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
+il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
 
 using il2cpp_assembly_get_image_prot = const Il2CppImage* (*)(const Il2CppAssembly*);
 static il2cpp_assembly_get_image_prot il2cpp_assembly_get_image = nullptr;
@@ -52,7 +52,35 @@ using il2cpp_image_get_name_prot = const char* (*)(const Il2CppImage*);
 static il2cpp_image_get_name_prot il2cpp_image_get_name = nullptr;
 
 using il2cpp_runtime_invoke_prot = void* (*)(const Il2CppMethod*, void*, void**, void**);
-static il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
+il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
+
+// Additional IL2CPP function pointers for AI Vacuum
+using il2cpp_object_get_class_prot = Il2CppClass * (*)(void*);
+il2cpp_object_get_class_prot il2cpp_object_get_class = nullptr;
+
+using il2cpp_class_get_type_prot = void* (*)(Il2CppClass*);
+il2cpp_class_get_type_prot il2cpp_class_get_type = nullptr;
+
+using il2cpp_type_get_object_prot = void* (*)(void*);
+il2cpp_type_get_object_prot il2cpp_type_get_object = nullptr;
+
+using il2cpp_class_get_parent_prot = Il2CppClass * (*)(Il2CppClass*);
+il2cpp_class_get_parent_prot il2cpp_class_get_parent = nullptr;
+
+using il2cpp_class_get_fields_prot = void* (*)(Il2CppClass*, void**);
+il2cpp_class_get_fields_prot il2cpp_class_get_fields = nullptr;
+
+using il2cpp_field_get_name_prot = const char* (*)(void*);
+il2cpp_field_get_name_prot il2cpp_field_get_name = nullptr;
+
+using il2cpp_field_get_value_prot = void (*)(void*, void*, void*);
+il2cpp_field_get_value_prot il2cpp_field_get_value = nullptr;
+
+using il2cpp_method_get_param_count_prot = uint32_t(*)(const Il2CppMethod*);
+il2cpp_method_get_param_count_prot il2cpp_method_get_param_count = nullptr;
+
+using il2cpp_object_unbox_prot = void* (*)(void*);
+il2cpp_object_unbox_prot il2cpp_object_unbox = nullptr;
 
 // =================================================================
 // 1. Global Variables
@@ -489,6 +517,17 @@ void start()
     il2cpp_assembly_get_image = (il2cpp_assembly_get_image_prot)GetProcAddress(il2cpp, "il2cpp_assembly_get_image");
     il2cpp_image_get_name = (il2cpp_image_get_name_prot)GetProcAddress(il2cpp, "il2cpp_image_get_name");
     il2cpp_runtime_invoke = (il2cpp_runtime_invoke_prot)GetProcAddress(il2cpp, "il2cpp_runtime_invoke");
+
+    // Additional IL2CPP functions for AI Vacuum
+    il2cpp_object_get_class = (il2cpp_object_get_class_prot)GetProcAddress(il2cpp, "il2cpp_object_get_class");
+    il2cpp_class_get_type = (il2cpp_class_get_type_prot)GetProcAddress(il2cpp, "il2cpp_class_get_type");
+    il2cpp_type_get_object = (il2cpp_type_get_object_prot)GetProcAddress(il2cpp, "il2cpp_type_get_object");
+    il2cpp_class_get_parent = (il2cpp_class_get_parent_prot)GetProcAddress(il2cpp, "il2cpp_class_get_parent");
+    il2cpp_class_get_fields = (il2cpp_class_get_fields_prot)GetProcAddress(il2cpp, "il2cpp_class_get_fields");
+    il2cpp_field_get_name = (il2cpp_field_get_name_prot)GetProcAddress(il2cpp, "il2cpp_field_get_name");
+    il2cpp_field_get_value = (il2cpp_field_get_value_prot)GetProcAddress(il2cpp, "il2cpp_field_get_value");
+    il2cpp_method_get_param_count = (il2cpp_method_get_param_count_prot)GetProcAddress(il2cpp, "il2cpp_method_get_param_count");
+    il2cpp_object_unbox = (il2cpp_object_unbox_prot)GetProcAddress(il2cpp, "il2cpp_object_unbox");
 
     Sleep(15000);
 

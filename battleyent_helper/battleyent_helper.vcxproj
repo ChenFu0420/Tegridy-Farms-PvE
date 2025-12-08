@@ -155,9 +155,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Advapi32Patch.cpp" />
     <ClCompile Include="dllmain.cpp" />
-    <ClCompile Include="DX11Hook.h" />
     <ClCompile Include="Features.cpp" />
     <ClCompile Include="iat_hook.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
@@ -171,7 +169,6 @@
     <ClCompile Include="Overlay.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Advapi32Patch.h" />
     <ClInclude Include="Features.h" />
     <ClInclude Include="iat_hook.h" />
     <ClInclude Include="imgui\imconfig.h" />

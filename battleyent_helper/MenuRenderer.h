@@ -16,4 +16,6 @@ namespace MenuRenderer
     void RenderPlayerTab();
     void RenderCombatTab();
     void RenderAITab();
+    void RenderVisualTab();
+    void RenderLootTab();
 }

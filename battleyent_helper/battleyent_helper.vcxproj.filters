@@ -18,14 +18,8 @@
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Advapi32Patch.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Overlay.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="DX11Hook.h">
-      <Filter>Header Files</Filter>
     </ClCompile>
     <ClCompile Include="Features.cpp">
       <Filter>Source Files</Filter>
@@ -59,9 +53,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Advapi32Patch.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Overlay.h">
       <Filter>Header Files</Filter>
     </ClInclude>

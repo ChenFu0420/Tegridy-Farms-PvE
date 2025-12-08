@@ -25,6 +25,15 @@ namespace Features
     extern bool breach_all_doors;
     extern bool lucky_search;
 
+    // Planned features (placeholders)
+    extern bool thermal_vision;
+    extern bool night_vision;
+    extern bool player_esp;
+    extern bool loot_esp;
+    extern float loot_esp_min_value;
+    extern bool item_spawner;
+    extern bool loot_vacuum;
+
     // Menu state
     extern bool menu_open;
 }
@@ -37,10 +46,10 @@ namespace PatchSystem
 {
     struct PatchData
     {
-        const Il2CppMethod* method;
-        void* functionPtr;
-        unsigned char originalBytes[16];
-        bool isPatched;
+        const Il2CppMethod* method = nullptr;
+        void* functionPtr = nullptr;
+        unsigned char originalBytes[16] = {};
+        bool isPatched = false;
         std::string name;
     };
 
@@ -89,4 +98,7 @@ namespace FeaturePatch
     // Continuous updates (run every frame)
     void UpdateGodMode();  // God mode uses continuous memory write, not patch
     void UpdateOfflinePVE();  // Force offline PVE raid
+
+    // AI Vacuum
+    void TeleportAllEnemiesToMe();
 }
