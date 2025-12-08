@@ -1,4 +1,5 @@
 # Tegridy-Farms-PvE-Menu
+ATTENTION: This repo is regularly updated, to keep informed check on UC or here for changes. Features will continue to be added until all I wanna add is implemented.
 
 This is not a standalone menu, you need battleyent to use this. You can get the fixed battleyent.exe from my github (fixes current BE issues in less words.)
 
