@@ -159,6 +159,7 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="DX11Hook.h" />
     <ClCompile Include="Features.cpp" />
+    <ClCompile Include="iat_hook.cpp" />
     <ClCompile Include="imgui\imgui.cpp" />
     <ClCompile Include="imgui\imgui_draw.cpp" />
     <ClCompile Include="imgui\imgui_impl_dx11.cpp" />
@@ -172,6 +173,7 @@
   <ItemGroup>
     <ClInclude Include="Advapi32Patch.h" />
     <ClInclude Include="Features.h" />
+    <ClInclude Include="iat_hook.h" />
     <ClInclude Include="imgui\imconfig.h" />
     <ClInclude Include="imgui\imgui.h" />
     <ClInclude Include="imgui\imgui_impl_dx11.h" />

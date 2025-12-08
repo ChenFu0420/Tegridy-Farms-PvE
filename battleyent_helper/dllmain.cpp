@@ -5,7 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <mutex>
-#include "Advapi32Patch.h"
+#include "iat_hook.h"      // REPLACED: Advapi32Patch.h with iat_hook.h
 #include "Overlay.h"
 #include "DX11Hook.h"
 #include "Menu.h"
@@ -40,10 +40,10 @@ using il2cpp_class_from_name_prot = Il2CppClass * (*)(const Il2CppImage*, const 
 il2cpp_class_from_name_prot il2cpp_class_from_name = nullptr;
 
 using il2cpp_class_get_methods_prot = const Il2CppMethod* (*)(Il2CppClass*, void**);
-il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
+static il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
 
 using il2cpp_method_get_name_prot = const char* (*)(const Il2CppMethod*);
-il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
+static il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
 
 using il2cpp_assembly_get_image_prot = const Il2CppImage* (*)(const Il2CppAssembly*);
 static il2cpp_assembly_get_image_prot il2cpp_assembly_get_image = nullptr;
@@ -66,6 +66,16 @@ void* g_CameraManagerInstance = nullptr;
 uintptr_t g_selectedLocation = 0;
 
 #define STATIC_FIELDS_OFFSET 0xB8
+
+// Offsets for game structures (version 1.0.0.2.42157)
+#define OFFSET_RAID_SETTINGS 0xD0
+#define OFFSET_SELECTED_LOCATION 0xA8
+#define OFFSET_FORCE_ONLINE_RAID 0x32
+#define OFFSET_FORCE_OFFLINE_RAID 0x33
+#define OFFSET_EFFECTS_CONTROLLER 0x18
+#define OFFSET_LOCAL_PLAYER 0x108
+#define OFFSET_HEALTH_CONTROLLER 0x940
+#define OFFSET_DAMAGE_COEFF 0x34
 
 // =================================================================
 // 2. DX11 Present Hook Implementation
@@ -427,10 +437,42 @@ void start()
     printf("  Tegridy Farms - PvE Bypass\n");
     printf("  Version: 1.0.0.2.42157\n");
     printf("========================================\n\n");
-    printf("[+] Thread-freezing Advapi32 patches applied successfully\n\n");
+    printf("[+] IAT Hook BEService bypass applied successfully\n\n");
+
+    // Patch UnityPlayer BEService check IMMEDIATELY
+    printf("[*] Step 1: Patching UnityPlayer BEService check...\n");
+
+    HMODULE hUnityPlayer = nullptr;
+    while (!(hUnityPlayer = GetModuleHandleA("UnityPlayer.dll")))
+    {
+        Sleep(1);
+    }
+    printf("[+] UnityPlayer.dll found at 0x%p\n", hUnityPlayer);
+
+    uintptr_t beCheckOffset = 0x876C60;
+    void* beCheckFunc = (void*)((uintptr_t)hUnityPlayer + beCheckOffset);
+
+    printf("[*] Patching BE Service check at 0x%p...\n", beCheckFunc);
+
+    // Patch: mov al, 1; ret (returns true = service running)
+    DWORD oldProtect;
+    if (VirtualProtect(beCheckFunc, 3, PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        uint8_t* patch = (uint8_t*)beCheckFunc;
+        patch[0] = 0xB0;  // mov al, 1
+        patch[1] = 0x01;
+        patch[2] = 0xC3;  // ret
+        VirtualProtect(beCheckFunc, 3, oldProtect, &oldProtect);
+        FlushInstructionCache(GetCurrentProcess(), beCheckFunc, 3);
+        printf("[+] BE Service check BYPASSED!\n");
+    }
+    else
+    {
+        printf("[-] Failed to patch UnityPlayer BEService check!\n");
+    }
 
     // Initialize IL2CPP
-    printf("[*] Step 1: Initializing IL2CPP...\n");
+    printf("\n[*] Step 2: Initializing IL2CPP...\n");
 
     HMODULE il2cpp = nullptr;
     while (!(il2cpp = GetModuleHandleA("GameAssembly.dll")))
@@ -457,7 +499,7 @@ void start()
     Sleep(1000);
 
     // Find Assembly-CSharp
-    printf("\n[*] Step 2: Loading Assembly-CSharp...\n");
+    printf("\n[*] Step 3: Loading Assembly-CSharp...\n");
 
     Il2CppImage* image = nullptr;
     while (!(image = il2cpp_image_loaded("Assembly-CSharp.dll")))
@@ -467,7 +509,7 @@ void start()
     Sleep(1000);
 
     // Patch BattlEye
-    printf("\n[*] Step 3: Patching BattlEye initialization...\n");
+    printf("\n[*] Step 4: Patching BattlEye initialization...\n");
 
     auto tarkovApp = il2cpp_class_from_name(image, "EFT", "TarkovApplication");
     if (!tarkovApp)
@@ -486,12 +528,12 @@ void start()
         printf("[+] Battleye init patched\n");
     }
 
-    printf("[+] BEClient_x64.dll prevented from loading via Advapi32 bypass\n");
+    printf("[+] BEClient_x64.dll prevented from loading via IAT hook\n");
 
     Sleep(1000);
 
     // Patch error screen
-    printf("\n[*] Step 4: Patching error screen...\n");
+    printf("\n[*] Step 5: Patching error screen...\n");
 
     auto preloaderUI = il2cpp_class_from_name(image, "EFT.UI", "PreloaderUI");
     if (preloaderUI)
@@ -507,14 +549,13 @@ void start()
     Sleep(1000);
 
     // Initialize all feature patches (create them, don't enable yet)
-    printf("\n[*] Step 5: Initializing feature patches...\n");
+    printf("\n[*] Step 6: Initializing feature patches...\n");
     FeaturePatch::InitializeAllPatches(image);
 
     Sleep(1000);
 
     // Initialize DX11 Hook
-    printf("\n[*] Step 6: Initializing DX11 hook for ImGui...\n");
-    Sleep(5000);
+    printf("\n[*] Step 7: Initializing DX11 hook for ImGui...\n");
 
     if (DX11Hook::Initialize())
     {
@@ -527,15 +568,13 @@ void start()
 
     Sleep(1000);
 
-    // Complete
-    printf("\n========================================\n");
-    printf("  All patches applied successfully!\n");
+    // Clear console and show clean header
+    system("cls");
+    printf("========================================\n");
+    printf("  Tegridy Farms - Active\n");
     printf("========================================\n\n");
-    printf("[SUCCESS] You can now play offline PVE\n");
     printf("[INFO] Press INSERT to open menu\n");
-    printf("[INFO] Press END key to terminate safely\n\n");
-
-    printf("[*] Scanning for game instances...\n\n");
+    printf("[INFO] Press END to exit safely\n\n");
 
     // Main loop
     bool patchesInitialized = false;
@@ -551,27 +590,36 @@ void start()
     bool prev_breach_all_doors = false;
     bool prev_lucky_search = false;
 
+    // Track printed instances
+    static bool tarkovAppPrinted = false;
+    static uintptr_t lastPrintedCM = 0;
+
     while (!(GetAsyncKeyState(VK_END) & 0x8000))
     {
         // Check menu input (INSERT key)
         Menu::CheckInput();
 
-        // Track TarkovApplication instance
+        // Track TarkovApplication instance (print once)
         if (!g_TarkovApplicationInstance)
         {
             g_TarkovApplicationInstance = get_tarkov_application_instance(tarkovApp);
-            if (g_TarkovApplicationInstance)
+            if (g_TarkovApplicationInstance && !tarkovAppPrinted)
             {
                 printf("[+] TarkovApplication = 0x%llX\n", (uintptr_t)g_TarkovApplicationInstance);
+                tarkovAppPrinted = true;
             }
         }
 
-        // Track CameraManager instance
+        // Track CameraManager instance (print only when changed)
         void* cm = get_camera_manager_instance(image);
         if (cm && cm != g_CameraManagerInstance)
         {
             g_CameraManagerInstance = cm;
-            printf("[+] CameraManager = 0x%llX\n", (uintptr_t)g_CameraManagerInstance);
+            if ((uintptr_t)cm != lastPrintedCM)
+            {
+                printf("[+] CameraManager = 0x%llX\n\n", (uintptr_t)cm);
+                lastPrintedCM = (uintptr_t)cm;
+            }
         }
 
         // Check if any feature toggle has changed
@@ -591,7 +639,7 @@ void start()
         {
             if (!patchesInitialized)
             {
-                printf("[*] Game ready - features can now be toggled via menu\n");
+                printf("[*] Game ready - features can now be toggled via menu\n\n");
                 patchesInitialized = true;
             }
 
@@ -619,17 +667,6 @@ void start()
         // Update offline PVE (every frame, but only writes when location changes)
         FeaturePatch::UpdateOfflinePVE();
 
-        // Print CameraManager periodically for CE debugging
-        static DWORD lastPrintTime = 0;
-        DWORD currentTime = GetTickCount();
-        if (cm && (currentTime - lastPrintTime) > 10000) // Every 10 seconds
-        {
-            printf("\n========================================\n");
-            printf("[CM] CameraManager = 0x%llX (copy for CE)\n", (uintptr_t)cm);
-            printf("========================================\n\n");
-            lastPrintTime = currentTime;
-        }
-
         Sleep(100);
     }
 
@@ -642,7 +679,7 @@ void start()
 }
 
 // =================================================================
-// 7. DLL Entry Point
+// 7. DLL Entry Point - UPDATED WITH IAT HOOK
 // =================================================================
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
@@ -652,30 +689,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
         DisableThreadLibraryCalls(hModule);
 
         // ========================================
-        // CRITICAL: Apply thread-freezing BEService bypass
+        // CRITICAL: Install IAT Hook for BEService bypass
+        // This is INSTANT - no thread freezing, no retries
         // ========================================
+        InstallBEServiceBypass();
 
-        if (!Advapi32Patch::PerformPreInjectionChecks())
-        {
-            // Show error message to user
-            MessageBoxA(NULL,
-                "BEService bypass failed!\n\n"
-                "The injection has been aborted for safety.\n"
-                "This prevents potential detection by BattlEye.\n\n"
-                "Possible reasons:\n"
-                "1. BattlEye is already active\n"
-                "2. BEClient_x64.dll is already loaded\n"
-                "3. Thread-freezing patch failed\n\n"
-                "Try restarting the game and injecting again.",
-                "Tegridy Farms - Injection Failed",
-                MB_ICONERROR | MB_OK);
-
-            return FALSE;  // Abort injection completely
-        }
-
-        printf("[SECURITY] All safety checks passed - starting main cheat thread\n");
-
-        // Start main thread only if bypass succeeded
+        // Start main thread
         CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)start, nullptr, 0, nullptr);
     }
 

@@ -54,6 +54,9 @@
     <ClCompile Include="imgui\imgui.cpp">
       <Filter>Resource Files</Filter>
     </ClCompile>
+    <ClCompile Include="iat_hook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Advapi32Patch.h">
@@ -94,6 +97,9 @@
     </ClInclude>
     <ClInclude Include="imgui\imgui.h">
       <Filter>Resource Files</Filter>
+    </ClInclude>
+    <ClInclude Include="iat_hook.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

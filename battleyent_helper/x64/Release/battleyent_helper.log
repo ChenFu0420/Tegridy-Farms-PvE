@@ -1,17 +1,7 @@
 ﻿  dllmain.cpp
-  Dx11hook.h
-  Features.cpp
-  imgui.cpp
-  imgui_draw.cpp
-  imgui_impl_dx11.cpp
-  imgui_impl_win32.cpp
-  imgui_tables.cpp
-  imgui_widgets.cpp
-  Menu.cpp
-  Menurenderer.cpp
-  Overlay.cpp
   Generating code
-  Previous IPDB not found, fall back to full compilation.
-  All 2316 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  2 of 1976 functions ( 0.1%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    38 functions had inline decision re-evaluated but remain unchanged
   Finished generating code
-  battleyent_helper.vcxproj -> D:\Tegridy\sources\battleyent-master\x64\Release\battleyent_helper.dll
+  battleyent_helper.vcxproj -> C:\Users\Cannabusy\Desktop\Current Source\x64\Release\battleyent_helper.dll

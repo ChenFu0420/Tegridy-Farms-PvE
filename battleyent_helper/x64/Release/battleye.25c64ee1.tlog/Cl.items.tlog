@@ -1,12 +1,14 @@
-D:\Tegridy\sources\battleyent-master\battleyent_helper\dllmain.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\dllmain.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\Dx11hook.h;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\Dx11hook.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\Features.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\Features.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui_draw.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui_draw.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui_impl_dx11.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui_impl_dx11.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui_impl_win32.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui_impl_win32.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui_tables.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui_tables.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\imgui_widgets.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\imgui_widgets.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\Menu.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\Menu.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\Menurenderer.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\Menurenderer.obj
-D:\Tegridy\sources\battleyent-master\battleyent_helper\Overlay.cpp;D:\Tegridy\sources\battleyent-master\battleyent_helper\x64\Release\Overlay.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\Advapi32Patch.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\Advapi32Patch.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\dllmain.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\dllmain.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\DX11Hook.h;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\DX11Hook.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\Features.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\Features.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\iat_hook.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\iat_hook.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui_draw.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui_draw.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui_impl_dx11.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui_impl_dx11.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui_impl_win32.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui_impl_win32.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui_tables.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui_tables.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\imgui\imgui_widgets.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\imgui_widgets.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\Menu.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\Menu.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\MenuRenderer.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\MenuRenderer.obj
+C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\Overlay.cpp;C:\Users\Cannabusy\Desktop\Current Source\battleyent_helper\x64\Release\Overlay.obj
