@@ -13,6 +13,68 @@
 #include "Features.h"
 
 // =================================================================
+// 0. Logging System
+// =================================================================
+static FILE* g_logFile = nullptr;
+static std::mutex g_logMutex;
+
+void WriteLog(const char* format, ...)
+{
+    std::lock_guard<std::mutex> lock(g_logMutex);
+
+    va_list args;
+    va_start(args, format);
+
+    // Write to console
+    vprintf(format, args);
+
+    // Write to file
+    if (g_logFile)
+    {
+        va_list args_copy;
+        va_copy(args_copy, args);
+        vfprintf(g_logFile, format, args_copy);
+        fflush(g_logFile); // Flush immediately in case of crash
+        va_end(args_copy);
+    }
+
+    va_end(args);
+}
+
+void InitLogging()
+{
+    // Get DLL directory
+    char dllPath[MAX_PATH];
+    HMODULE hModule = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)&InitLogging, &hModule);
+    GetModuleFileNameA(hModule, dllPath, MAX_PATH);
+
+    // Replace DLL name with log.txt
+    char* lastSlash = strrchr(dllPath, '\\');
+    if (lastSlash)
+    {
+        strcpy_s(lastSlash + 1, MAX_PATH - (lastSlash - dllPath + 1), "log.txt");
+    }
+
+    g_logFile = fopen(dllPath, "w");
+    if (g_logFile)
+    {
+        WriteLog("[+] Logging initialized: %s\n", dllPath);
+    }
+}
+
+void CloseLogging()
+{
+    if (g_logFile)
+    {
+        WriteLog("[*] Closing log file\n");
+        fclose(g_logFile);
+        g_logFile = nullptr;
+    }
+}
+
+// =================================================================
 // 0. IL2CPP Structs and Function Type Definitions
 // =================================================================
 typedef void (*Il2CppMethodPointer)();
@@ -111,30 +173,51 @@ uintptr_t g_selectedLocation = 0;
 
 HRESULT __stdcall DX11Hook::hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
 {
-    // First call - initialize overlay
-    if (!Overlay::IsInitialized())
+    try
     {
-        if (Overlay::Init(pSwapChain))
+        // First call - initialize overlay
+        if (!Overlay::IsInitialized() && !DX11Hook::g_isInitializing.load())
         {
-            printf("[+] ImGui overlay initialized from Present hook\n");
+            DX11Hook::g_isInitializing.store(true);
+            if (!Overlay::IsInitialized()) // Double-check after acquiring guard
+            {
+                if (Overlay::Init(pSwapChain))
+                {
+                    WriteLog("[+] ImGui overlay initialized from Present hook\n");
+                }
+                else
+                {
+                    WriteLog("[-] Failed to initialize ImGui overlay\n");
+                }
+            }
+            DX11Hook::g_isInitializing.store(false);
+        }
+
+        // Render overlay every frame
+        if (Overlay::IsInitialized())
+        {
+            Overlay::BeginFrame();
+
+            // Render hint text (always visible)
+            MenuRenderer::RenderHintText();
+
+            // Render main menu (if open)
+            MenuRenderer::RenderMainMenu();
+
+            Overlay::RenderFrame();
         }
     }
-
-    // Render overlay every frame
-    if (Overlay::IsInitialized())
+    catch (const std::exception& e)
     {
-        Overlay::BeginFrame();
-
-        // Render hint text (always visible)
-        MenuRenderer::RenderHintText();
-
-        // Render main menu (only if menu_open)
-        MenuRenderer::RenderMainMenu();
-
-        Overlay::RenderFrame();
+        WriteLog("[!] EXCEPTION IN PRESENT HOOK: %s\n", e.what());
+        CloseLogging();
+    }
+    catch (...)
+    {
+        WriteLog("[!] UNKNOWN EXCEPTION IN PRESENT HOOK\n");
+        CloseLogging();
     }
 
-    // Call original Present
     return oPresent(pSwapChain, SyncInterval, Flags);
 }
 
@@ -149,7 +232,7 @@ void log_info(const char* fmt, ...)
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
-    printf("\n");
+    WriteLog("\n");
     va_end(args);
 }
 
@@ -461,26 +544,29 @@ void start()
     FILE* fp;
     freopen_s(&fp, "CONOUT$", "w", stdout);
 
-    printf("========================================\n");
-    printf("  Tegridy Farms - PvE Bypass\n");
-    printf("  Version: 1.0.0.2.42157\n");
-    printf("========================================\n\n");
-    printf("[+] IAT Hook BEService bypass applied successfully\n\n");
+    // Initialize logging
+    InitLogging();
+
+    WriteLog("========================================\n");
+    WriteLog("  Tegridy Farms - PvE Bypass\n");
+    WriteLog("  Version: 1.0.0.2.42157\n");
+    WriteLog("========================================\n\n");
+    WriteLog("[+] IAT Hook BEService bypass applied successfully\n\n");
 
     // Patch UnityPlayer BEService check IMMEDIATELY
-    printf("[*] Step 1: Patching UnityPlayer BEService check...\n");
+    WriteLog("[*] Step 1: Patching UnityPlayer BEService check...\n");
 
     HMODULE hUnityPlayer = nullptr;
     while (!(hUnityPlayer = GetModuleHandleA("UnityPlayer.dll")))
     {
         Sleep(1);
     }
-    printf("[+] UnityPlayer.dll found at 0x%p\n", hUnityPlayer);
+    WriteLog("[+] UnityPlayer.dll found at 0x%p\n", hUnityPlayer);
 
     uintptr_t beCheckOffset = 0x876C60;
     void* beCheckFunc = (void*)((uintptr_t)hUnityPlayer + beCheckOffset);
 
-    printf("[*] Patching BE Service check at 0x%p...\n", beCheckFunc);
+    WriteLog("[*] Patching BE Service check at 0x%p...\n", beCheckFunc);
 
     // Patch: mov al, 1; ret (returns true = service running)
     DWORD oldProtect;
@@ -492,20 +578,20 @@ void start()
         patch[2] = 0xC3;  // ret
         VirtualProtect(beCheckFunc, 3, oldProtect, &oldProtect);
         FlushInstructionCache(GetCurrentProcess(), beCheckFunc, 3);
-        printf("[+] BE Service check BYPASSED!\n");
+        WriteLog("[+] BE Service check BYPASSED!\n");
     }
     else
     {
-        printf("[-] Failed to patch UnityPlayer BEService check!\n");
+        WriteLog("[-] Failed to patch UnityPlayer BEService check!\n");
     }
 
     // Initialize IL2CPP
-    printf("\n[*] Step 2: Initializing IL2CPP...\n");
+    WriteLog("\n[*] Step 2: Initializing IL2CPP...\n");
 
     HMODULE il2cpp = nullptr;
     while (!(il2cpp = GetModuleHandleA("GameAssembly.dll")))
         Sleep(2000);
-    printf("[+] GameAssembly.dll Found\n");
+    WriteLog("[+] GameAssembly.dll Found\n");
 
     // Resolve IL2CPP functions
     il2cpp_get_root_domain = (il2cpp_get_root_domain_prot)GetProcAddress(il2cpp, "il2cpp_domain_get");
@@ -529,34 +615,35 @@ void start()
     il2cpp_method_get_param_count = (il2cpp_method_get_param_count_prot)GetProcAddress(il2cpp, "il2cpp_method_get_param_count");
     il2cpp_object_unbox = (il2cpp_object_unbox_prot)GetProcAddress(il2cpp, "il2cpp_object_unbox");
 
-    Sleep(15000);
+    WriteLog("[*] Waiting 25 seconds for game to fully initialize...\n");
+    Sleep(25000);
 
     Il2CppDomain* domain = il2cpp_get_root_domain();
     il2cpp_thread_attach(domain);
-    printf("[+] Attached to IL2CPP domain\n");
+    WriteLog("[+] Attached to IL2CPP domain\n");
 
     Sleep(1000);
 
     // Find Assembly-CSharp
-    printf("\n[*] Step 3: Loading Assembly-CSharp...\n");
+    WriteLog("\n[*] Step 3: Loading Assembly-CSharp...\n");
 
     Il2CppImage* image = nullptr;
     while (!(image = il2cpp_image_loaded("Assembly-CSharp.dll")))
         Sleep(2000);
-    printf("[+] Assembly-CSharp.dll Found\n");
+    WriteLog("[+] Assembly-CSharp.dll Found\n");
 
     Sleep(1000);
 
     // Patch BattlEye
-    printf("\n[*] Step 4: Patching BattlEye initialization...\n");
+    WriteLog("\n[*] Step 4: Patching BattlEye initialization...\n");
 
     auto tarkovApp = il2cpp_class_from_name(image, "EFT", "TarkovApplication");
     if (!tarkovApp)
     {
-        printf("[-] TarkovApplication Not Found\n");
+        WriteLog("[-] TarkovApplication Not Found\n");
         return;
     }
-    printf("[+] TarkovApplication Found\n");
+    WriteLog("[+] TarkovApplication Found\n");
 
     Sleep(1000);
 
@@ -564,15 +651,15 @@ void start()
     if (battleyeMethod)
     {
         patch_method_ret_safe(battleyeMethod);
-        printf("[+] Battleye init patched\n");
+        WriteLog("[+] Battleye init patched\n");
     }
 
-    printf("[+] BEClient_x64.dll prevented from loading via IAT hook\n");
+    WriteLog("[+] BEClient_x64.dll prevented from loading via IAT hook\n");
 
     Sleep(1000);
 
     // Patch error screen
-    printf("\n[*] Step 5: Patching error screen...\n");
+    WriteLog("\n[*] Step 5: Patching error screen...\n");
 
     auto preloaderUI = il2cpp_class_from_name(image, "EFT.UI", "PreloaderUI");
     if (preloaderUI)
@@ -581,39 +668,39 @@ void start()
         for (auto m : error_screen_methods)
         {
             patch_method_ret_safe(m);
-            printf("[+] ShowErrorScreen --> Patched\n");
+            WriteLog("[+] ShowErrorScreen --> Patched\n");
         }
     }
 
     Sleep(1000);
 
     // Initialize all feature patches (create them, don't enable yet)
-    printf("\n[*] Step 6: Initializing feature patches...\n");
+    WriteLog("\n[*] Step 6: Initializing feature patches...\n");
     FeaturePatch::InitializeAllPatches(image);
 
     Sleep(1000);
 
     // Initialize DX11 Hook
-    printf("\n[*] Step 7: Initializing DX11 hook for ImGui...\n");
+    WriteLog("\n[*] Step 7: Initializing DX11 hook for ImGui...\n");
 
     if (DX11Hook::Initialize())
     {
-        printf("[+] DX11 hook initialized\n");
+        WriteLog("[+] DX11 hook initialized\n");
     }
     else
     {
-        printf("[-] Failed to initialize DX11 hook\n");
+        WriteLog("[-] Failed to initialize DX11 hook\n");
     }
 
     Sleep(1000);
 
     // Clear console and show clean header
     system("cls");
-    printf("========================================\n");
-    printf("  Tegridy Farms - Active\n");
-    printf("========================================\n\n");
-    printf("[INFO] Press INSERT to open menu\n");
-    printf("[INFO] Press END to exit safely\n\n");
+    WriteLog("========================================\n");
+    WriteLog("  Tegridy Farms - Active\n");
+    WriteLog("========================================\n\n");
+    WriteLog("[INFO] Press INSERT to open menu\n");
+    WriteLog("[INFO] Press END to exit safely\n\n");
 
     // Main loop
     bool patchesInitialized = false;
@@ -644,7 +731,7 @@ void start()
             g_TarkovApplicationInstance = get_tarkov_application_instance(tarkovApp);
             if (g_TarkovApplicationInstance && !tarkovAppPrinted)
             {
-                printf("[+] TarkovApplication = 0x%llX\n", (uintptr_t)g_TarkovApplicationInstance);
+                WriteLog("[+] TarkovApplication = 0x%llX\n", (uintptr_t)g_TarkovApplicationInstance);
                 tarkovAppPrinted = true;
             }
         }
@@ -656,7 +743,7 @@ void start()
             g_CameraManagerInstance = cm;
             if ((uintptr_t)cm != lastPrintedCM)
             {
-                printf("[+] CameraManager = 0x%llX\n\n", (uintptr_t)cm);
+                WriteLog("[+] CameraManager = 0x%llX\n\n", (uintptr_t)cm);
                 lastPrintedCM = (uintptr_t)cm;
             }
         }
@@ -678,7 +765,7 @@ void start()
         {
             if (!patchesInitialized)
             {
-                printf("[*] Game ready - features can now be toggled via menu\n\n");
+                WriteLog("[*] Game ready - features can now be toggled via menu\n\n");
                 patchesInitialized = true;
             }
 
@@ -710,8 +797,9 @@ void start()
     }
 
     // END key pressed
-    printf("\n[!] END key detected - terminating process...\n");
-    printf("[!] No telemetry will be sent.\n");
+    WriteLog("\n[!] END key detected - terminating process...\n");
+    WriteLog("[!] No telemetry will be sent.\n");
+    CloseLogging();
     Sleep(1000);
 
     TerminateProcess(GetCurrentProcess(), 0);

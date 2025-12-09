@@ -92,5 +92,8 @@
     <ClInclude Include="iat_hook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DX11Hook.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

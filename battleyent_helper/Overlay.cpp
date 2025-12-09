@@ -72,6 +72,16 @@ namespace Overlay
             return false;
         }
 
+        // Validate DirectX feature level
+        D3D_FEATURE_LEVEL featureLevel = g_pd3dDevice->GetFeatureLevel();
+        if (featureLevel < D3D_FEATURE_LEVEL_11_0)
+        {
+            printf("[-] DirectX 11.0+ required, got feature level: %d\n", featureLevel);
+            printf("[-] Your GPU or drivers may not support DX11\n");
+            return false;
+        }
+        printf("[+] DirectX Feature Level: 11_%d\n", (featureLevel - D3D_FEATURE_LEVEL_11_0));
+
         g_pd3dDevice->GetImmediateContext(&g_pd3dDeviceContext);
 
         // Get game window from SwapChain

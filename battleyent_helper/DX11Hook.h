@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <cstdio>
+#include <atomic>
 
 /*
  * MINIMAL DX11 HOOK - NO EXTERNAL LIBRARIES
@@ -18,6 +19,9 @@ namespace DX11Hook
 
     // Original Present function
     static Present_t oPresent = nullptr;
+
+    // Initialization guard to prevent race conditions
+    static std::atomic<bool> g_isInitializing = false;
 
     // Your hooked Present function (declare here, define in dllmain.cpp)
     HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
