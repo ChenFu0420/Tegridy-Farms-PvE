@@ -1,4 +1,4 @@
-#include <Windows.h>
+﻿#include <Windows.h>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -116,6 +116,9 @@ static il2cpp_image_get_name_prot il2cpp_image_get_name = nullptr;
 using il2cpp_runtime_invoke_prot = void* (*)(const Il2CppMethod*, void*, void**, void**);
 il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
 
+using il2cpp_string_new_prot = Il2CppObject * (*)(const char*);
+using il2cpp_method_get_flags_prot = uint32_t(*)(const Il2CppMethod*, uint32_t*);
+
 // Additional IL2CPP function pointers for AI Vacuum
 using il2cpp_object_get_class_prot = Il2CppClass * (*)(void*);
 il2cpp_object_get_class_prot il2cpp_object_get_class = nullptr;
@@ -143,6 +146,12 @@ il2cpp_method_get_param_count_prot il2cpp_method_get_param_count = nullptr;
 
 using il2cpp_object_unbox_prot = void* (*)(void*);
 il2cpp_object_unbox_prot il2cpp_object_unbox = nullptr;
+
+using il2cpp_string_new_prot = Il2CppObject * (*)(const char*);
+il2cpp_string_new_prot il2cpp_string_new = nullptr;
+
+using il2cpp_method_get_flags_prot = uint32_t(*)(const Il2CppMethod*, uint32_t*);
+il2cpp_method_get_flags_prot il2cpp_method_get_flags = nullptr;
 
 // =================================================================
 // 1. Global Variables
@@ -614,6 +623,12 @@ void start()
     il2cpp_field_get_value = (il2cpp_field_get_value_prot)GetProcAddress(il2cpp, "il2cpp_field_get_value");
     il2cpp_method_get_param_count = (il2cpp_method_get_param_count_prot)GetProcAddress(il2cpp, "il2cpp_method_get_param_count");
     il2cpp_object_unbox = (il2cpp_object_unbox_prot)GetProcAddress(il2cpp, "il2cpp_object_unbox");
+    il2cpp_string_new = (il2cpp_string_new_prot)GetProcAddress(il2cpp, "il2cpp_string_new");
+    il2cpp_method_get_flags = (il2cpp_method_get_flags_prot)GetProcAddress(il2cpp, "il2cpp_method_get_flags");
+
+    // Additional IL2CPP functions for Item spawning 
+    il2cpp_string_new = (il2cpp_string_new_prot)GetProcAddress(il2cpp, "il2cpp_string_new");
+    il2cpp_method_get_flags = (il2cpp_method_get_flags_prot)GetProcAddress(il2cpp, "il2cpp_method_get_flags");
 
     WriteLog("[*] Waiting 25 seconds for game to fully initialize...\n");
     Sleep(25000);
@@ -677,6 +692,9 @@ void start()
     // Initialize all feature patches (create them, don't enable yet)
     WriteLog("\n[*] Step 6: Initializing feature patches...\n");
     FeaturePatch::InitializeAllPatches(image);
+    // Initialize Item Spawner InitLevel hook
+    WriteLog("\n[*] Step 6b: Initializing Item Spawner hook...\n");
+    ItemSpawner::ProcessQueue(image);
 
     Sleep(1000);
 
@@ -792,6 +810,8 @@ void start()
 
         // Update offline PVE (every frame, but only writes when location changes)
         FeaturePatch::UpdateOfflinePVE();
+        // Keep ItemSpawner hook alive
+        ItemSpawner::ProcessQueue(image);
 
         Sleep(100);
     }

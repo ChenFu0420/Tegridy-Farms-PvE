@@ -1,6 +1,10 @@
 ﻿#include "Features.h"
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <random>
+#include <chrono>
+#include <algorithm>
 
 // External globals from dllmain.cpp
 extern void* g_TarkovApplicationInstance;
@@ -39,6 +43,8 @@ typedef const char* (*il2cpp_field_get_name_prot)(void*);
 typedef void (*il2cpp_field_get_value_prot)(void*, void*, void*);
 typedef uint32_t(*il2cpp_method_get_param_count_prot)(const Il2CppMethod*);
 typedef void* (*il2cpp_object_unbox_prot)(void*);
+typedef Il2CppObject* (*il2cpp_string_new_prot)(const char*);
+typedef uint32_t(*il2cpp_method_get_flags_prot)(const Il2CppMethod*, uint32_t*);
 
 extern il2cpp_object_get_class_prot il2cpp_object_get_class;
 extern il2cpp_class_get_type_prot il2cpp_class_get_type;
@@ -50,6 +56,10 @@ extern il2cpp_field_get_name_prot il2cpp_field_get_name;
 extern il2cpp_field_get_value_prot il2cpp_field_get_value;
 extern il2cpp_method_get_param_count_prot il2cpp_method_get_param_count;
 extern il2cpp_object_unbox_prot il2cpp_object_unbox;
+
+// Additional exports from dllmain.cpp for Item Spawner
+extern il2cpp_string_new_prot il2cpp_string_new;
+extern il2cpp_method_get_flags_prot il2cpp_method_get_flags;
 
 // External wrapper function from dllmain.cpp
 extern Il2CppImage* il2cpp_image_loaded(const char* image_name);
@@ -1083,5 +1093,659 @@ namespace FeaturePatch
             }
         }
         printf("[TP] Teleport Complete!\n");
+    }
+}
+
+// ========================================
+// Item Spawner Implementation
+// Reference: ItemSpawner namespace from guide
+// ========================================
+namespace ItemSpawner
+{
+    // ========================================
+    // Offsets from NewLuaTableOffsets.txt
+    // ========================================
+#define OFFSET_EFFECTS_CONTROLLER 0x18
+#define OFFSET_LOCAL_PLAYER 0x108
+#define OFFSET_INVENTORY_CONTROLLER 0x958
+#define OFFSET_INVENTORY 0x100
+#define OFFSET_EQUIPMENT 0x18
+#define OFFSET_SLOTS 0x80
+#define OFFSET_SLOT_BACKPACK 0x60
+#define OFFSET_BP_CONTAINED_ITEM 0x48
+#define OFFSET_BP_GRIDS 0x78
+#define OFFSET_SEARCHABLE_GRID_0 0x20
+#define OFFSET_STACK_OBJECTS_COUNT 0x24
+#define OFFSET_SPAWNED_IN_SESSION 0x68
+
+// ========================================
+// Global Variables
+// ========================================
+    using InitLevelFn = void* (__fastcall*)(void* self, void* itemFactory, void* config, bool loadBundlesAndCreatePools, void* resources, void* progress, void* ct);
+    static InitLevelFn g_OrigInitLevel = nullptr;
+    static void* g_InitLevelTarget = nullptr;
+    static bool g_InitLevelHooked = false;
+    static void* g_InitLevelGateway = nullptr;
+    static void* g_CapturedItemFactory = nullptr;
+    static const Il2CppMethod* g_CreateItemMethod = nullptr;
+
+    // ========================================
+    // Forward Declarations
+    // ========================================
+    bool TryAddToEquipmentSlot(void* item, int slotId);
+    bool ResolveCreateItemMethod();
+    std::string GenerateMongoId();
+
+    // ========================================
+    // Helper Functions
+    // ========================================
+
+    // Hook handler for GameWorld.InitLevel
+    static void* __fastcall InitLevel_Hook(void* self, void* itemFactory, void* config, bool loadBundlesAndCreatePools, void* resources, void* progress, void* ct)
+    {
+        if (itemFactory && !g_CapturedItemFactory)
+        {
+            g_CapturedItemFactory = itemFactory;
+            printf("[Spawner] Captured ItemFactory via InitLevel arg @ %p\n", itemFactory);
+        }
+        return g_OrigInitLevel ? g_OrigInitLevel(self, itemFactory, config, loadBundlesAndCreatePools, resources, progress, ct) : nullptr;
+    }
+
+    // Hook a virtual method via vtable entry match
+    bool HookVTable(void* instance, void* targetFn, void* detour, void** origOut)
+    {
+        if (!instance || !targetFn || !detour || !origOut) return false;
+        void** vtable = *(void***)instance;
+        if (!vtable) return false;
+
+        for (int i = 0; i < 512; ++i)
+        {
+            if (vtable[i] == targetFn)
+            {
+                DWORD oldProtect;
+                if (!VirtualProtect(&vtable[i], sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
+                    return false;
+                *origOut = vtable[i];
+                vtable[i] = detour;
+                VirtualProtect(&vtable[i], sizeof(void*), oldProtect, &oldProtect);
+                FlushInstructionCache(GetCurrentProcess(), &vtable[i], sizeof(void*));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Simple 64-bit absolute jump writer
+    void WriteAbsJump(void* src, void* dst)
+    {
+        uint8_t patch[12] = { 0x48, 0xB8 };
+        memcpy(patch + 2, &dst, sizeof(void*));
+        patch[10] = 0xFF;
+        patch[11] = 0xE0;
+        DWORD old;
+        if (VirtualProtect(src, sizeof(patch), PAGE_EXECUTE_READWRITE, &old))
+        {
+            memcpy(src, patch, sizeof(patch));
+            VirtualProtect(src, sizeof(patch), old, &old);
+            FlushInstructionCache(GetCurrentProcess(), src, sizeof(patch));
+        }
+    }
+
+    bool InstallDirectDetour(void* fn)
+    {
+        if (!fn || g_InitLevelGateway) return false;
+
+        const size_t stolen = 16;
+        g_InitLevelGateway = VirtualAlloc(nullptr, stolen + 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+        if (!g_InitLevelGateway) return false;
+
+        memcpy(g_InitLevelGateway, fn, stolen);
+        void* jumpBack = (uint8_t*)fn + stolen;
+        WriteAbsJump((uint8_t*)g_InitLevelGateway + stolen, jumpBack);
+
+        g_OrigInitLevel = (InitLevelFn)g_InitLevelGateway;
+        WriteAbsJump(fn, (void*)&InitLevel_Hook);
+        printf("[Spawner] Direct detour installed @ %p gateway=%p (stolen=%zu)\n", fn, g_InitLevelGateway, stolen);
+        return true;
+    }
+
+    void TryHookInitLevel(Il2CppImage* image)
+    {
+        if (g_InitLevelHooked || g_InitLevelGateway)
+            return;
+
+        // Prefer direct detour on method code
+        if (image && il2cpp_class_from_name && il2cpp_class_get_methods && il2cpp_method_get_name && il2cpp_method_get_param_count)
+        {
+            Il2CppClass* gwClass = (Il2CppClass*)il2cpp_class_from_name(image, "EFT", "GameWorld");
+            const Il2CppMethod* targetMethod = nullptr;
+            void* iter = nullptr;
+            while (gwClass && (targetMethod = il2cpp_class_get_methods(gwClass, &iter)))
+            {
+                const char* nm = il2cpp_method_get_name(targetMethod);
+                if (nm && strcmp(nm, "InitLevel") == 0 && il2cpp_method_get_param_count && il2cpp_method_get_param_count(targetMethod) == 6)
+                    break;
+                targetMethod = nullptr;
+            }
+
+            if (targetMethod)
+            {
+                void* fn = nullptr;
+                int spins = 0;
+                while (!(fn = *(void**)targetMethod) && spins < 50)
+                {
+                    Sleep(20);
+                    spins++;
+                }
+                if (fn && InstallDirectDetour(fn))
+                {
+                    g_InitLevelTarget = fn;
+                    g_InitLevelHooked = true;
+                    return;
+                }
+                else
+                {
+                    printf("[-] Direct detour install failed for InitLevel\n");
+                }
+            }
+        }
+
+        // Fallback: vtable hook on live instance
+        void* gwInstance = GetGameWorldInstance();
+        if (!gwInstance) return;
+
+        Il2CppClass* gwClass = il2cpp_object_get_class ? il2cpp_object_get_class(gwInstance) : nullptr;
+        if (!gwClass && image && il2cpp_class_from_name)
+            gwClass = (Il2CppClass*)il2cpp_class_from_name(image, "EFT", "GameWorld");
+        if (!gwClass || !il2cpp_class_get_methods || !il2cpp_method_get_name || !il2cpp_method_get_param_count)
+            return;
+
+        const Il2CppMethod* targetMethod = nullptr;
+        void* iter = nullptr;
+        while (const Il2CppMethod* m = il2cpp_class_get_methods(gwClass, &iter))
+        {
+            const char* nm = il2cpp_method_get_name(m);
+            if (nm && strcmp(nm, "InitLevel") == 0 && il2cpp_method_get_param_count && il2cpp_method_get_param_count(m) == 6)
+            {
+                targetMethod = m;
+                break;
+            }
+        }
+        if (!targetMethod) return;
+
+        void* fn = nullptr;
+        int spins = 0;
+        while (!(fn = *(void**)targetMethod) && spins < 50)
+        {
+            Sleep(50);
+            spins++;
+        }
+        if (!fn) return;
+
+        if (HookVTable(gwInstance, fn, (void*)&InitLevel_Hook, (void**)&g_OrigInitLevel))
+        {
+            g_InitLevelTarget = fn;
+            g_InitLevelHooked = true;
+            printf("[Spawner] Hooked GameWorld.InitLevel via vtable @ %p\n", fn);
+        }
+    }
+
+    std::mt19937& Rng()
+    {
+        static std::mt19937 rng(static_cast<uint32_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+        return rng;
+    }
+
+    std::string GenerateMongoId()
+    {
+        static const char hex[] = "0123456789abcdef";
+        std::uniform_int_distribution<int> dist(0, 15);
+        std::string out;
+        out.reserve(24);
+        for (int i = 0; i < 24; ++i)
+        {
+            out.push_back(static_cast<char>(hex[dist(Rng())]));
+        }
+        return out;
+    }
+
+    bool IsValidTpl(const std::string& tpl)
+    {
+        if (tpl.size() != 24) return false;
+        return std::all_of(tpl.begin(), tpl.end(), [](char c)
+            {
+                return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            });
+    }
+
+    bool ResolveCreateItemMethod()
+    {
+        if (g_CreateItemMethod) return true;
+        if (!g_CapturedItemFactory || !il2cpp_object_get_class) return false;
+
+        Il2CppClass* cls = il2cpp_object_get_class(g_CapturedItemFactory);
+        void* it = nullptr;
+        while (const Il2CppMethod* m = il2cpp_class_get_methods(cls, &it))
+        {
+            const char* nm = il2cpp_method_get_name(m);
+            if (!nm || strcmp(nm, "CreateItem")) continue;
+            if (il2cpp_method_get_param_count && il2cpp_method_get_param_count(m) != 3) continue;
+            if (il2cpp_method_get_flags)
+            {
+                uint32_t ifl = 0, fl = il2cpp_method_get_flags(m, &ifl);
+                if (fl & 0x0010) continue; // skip static
+            }
+            int spins = 0;
+            while (!*(void**)m && spins++ < 50) Sleep(20);
+            if (!*(void**)m) continue;
+
+            g_CreateItemMethod = m;
+            printf("[Spawner] CreateItem (instance) @%p fn=%p\n", m, *(void**)m);
+            return true;
+        }
+        return false;
+    }
+
+    bool TryAddToBackpack(void* item)
+    {
+        if (!item) return false;
+        if (!g_CameraManagerInstance)
+        {
+            printf("[-] No CameraManager, cannot add to backpack\n");
+            return false;
+        }
+
+        uintptr_t effectsController = *(uintptr_t*)((uintptr_t)g_CameraManagerInstance + OFFSET_EFFECTS_CONTROLLER);
+        uintptr_t localPlayer = effectsController ? *(uintptr_t*)(effectsController + OFFSET_LOCAL_PLAYER) : 0;
+        uintptr_t invController = localPlayer ? *(uintptr_t*)(localPlayer + OFFSET_INVENTORY_CONTROLLER) : 0;
+        uintptr_t inventory = invController ? *(uintptr_t*)(invController + OFFSET_INVENTORY) : 0;
+        uintptr_t equipment = inventory ? *(uintptr_t*)(inventory + OFFSET_EQUIPMENT) : 0;
+        uintptr_t slots = equipment ? *(uintptr_t*)(equipment + OFFSET_SLOTS) : 0;
+        uintptr_t backpackSlot = slots ? *(uintptr_t*)(slots + OFFSET_SLOT_BACKPACK) : 0;
+
+        if (!backpackSlot)
+        {
+            printf("[-] Backpack slot not found\n");
+            return false;
+        }
+
+        uintptr_t backpackItem = *(uintptr_t*)((uintptr_t)backpackSlot + OFFSET_BP_CONTAINED_ITEM);
+        if (!backpackItem)
+        {
+            printf("[Spawner] No backpack found, spawning raid backpack...\n");
+
+            // Spawn raid backpack
+            if (!g_CapturedItemFactory || !ResolveCreateItemMethod())
+            {
+                printf("[-] Cannot create backpack - ItemFactory not ready\n");
+                return false;
+            }
+
+            std::string backpackTpl = "5df8a4d786f77412672a1e3b"; // Raid backpack
+            std::string mongo = GenerateMongoId();
+            Il2CppObject* mongoStr = il2cpp_string_new(mongo.c_str());
+            Il2CppObject* tplStr = il2cpp_string_new(backpackTpl.c_str());
+            void* argsCreate[] = { mongoStr, tplStr, nullptr };
+            void* exc = nullptr;
+            void* backpack = il2cpp_runtime_invoke(g_CreateItemMethod, g_CapturedItemFactory, argsCreate, &exc);
+
+            if (exc || !backpack)
+            {
+                printf("[-] Failed to create backpack\n");
+                return false;
+            }
+
+            *(int32_t*)((uintptr_t)backpack + OFFSET_STACK_OBJECTS_COUNT) = 1;
+            *(uint8_t*)((uintptr_t)backpack + OFFSET_SPAWNED_IN_SESSION) = 1;
+
+            // Add backpack to backpack slot (slot ID 4)
+            if (!TryAddToEquipmentSlot(backpack, 4))
+            {
+                printf("[-] Failed to equip backpack\n");
+                return false;
+            }
+
+            printf("[+] Raid backpack spawned and equipped\n");
+
+            // Re-fetch backpack item pointer after equipping
+            backpackItem = *(uintptr_t*)((uintptr_t)backpackSlot + OFFSET_BP_CONTAINED_ITEM);
+            if (!backpackItem)
+            {
+                printf("[-] Backpack still null after spawn\n");
+                return false;
+            }
+        }
+
+        uintptr_t grids = *(uintptr_t*)(backpackItem + OFFSET_BP_GRIDS);
+        uintptr_t grid0 = grids ? *(uintptr_t*)(grids + OFFSET_SEARCHABLE_GRID_0) : 0;
+        if (!grid0)
+        {
+            printf("[-] Grid0 not found, cannot AddAnywhere\n");
+            return false;
+        }
+
+        const Il2CppMethod* addAnywhere = FindMethodRecursive(il2cpp_object_get_class((void*)grid0), "AddAnywhere");
+        if (!addAnywhere)
+        {
+            printf("[-] AddAnywhere not found on Grid\n");
+            return false;
+        }
+
+        uint32_t pc = il2cpp_method_get_param_count ? il2cpp_method_get_param_count(addAnywhere) : 0;
+        if (pc != 2)
+        {
+            printf("[-] AddAnywhere param count %u not supported (expected 2)\n", pc);
+            return false;
+        }
+
+        int32_t errorHandling = 0;
+        void* args[] = { item, &errorHandling };
+        void* exc = nullptr;
+        void* ret = il2cpp_runtime_invoke(addAnywhere, (void*)grid0, args, &exc);
+        if (exc)
+        {
+            printf("[-] AddAnywhere threw exception %p\n", exc);
+            return false;
+        }
+
+        bool ok = true;
+        if (ret && il2cpp_object_unbox)
+            ok = *(bool*)il2cpp_object_unbox(ret);
+        else if (!ret)
+            ok = false;
+
+        if (ok)
+        {
+            *(int32_t*)((uintptr_t)item + OFFSET_STACK_OBJECTS_COUNT) = 1;
+            *(uint8_t*)((uintptr_t)item + OFFSET_SPAWNED_IN_SESSION) = 1;
+            printf("[+] Item added via Grid.AddAnywhere\n");
+            return true;
+        }
+
+        printf("[-] AddAnywhere returned false\n");
+        return false;
+    }
+
+    bool TryAddToEquipmentSlot(void* item, int slotId)
+    {
+        if (!item) return false;
+        if (!g_CameraManagerInstance) return false;
+
+        uintptr_t effectsController = *(uintptr_t*)((uintptr_t)g_CameraManagerInstance + OFFSET_EFFECTS_CONTROLLER);
+        uintptr_t localPlayer = effectsController ? *(uintptr_t*)(effectsController + OFFSET_LOCAL_PLAYER) : 0;
+        uintptr_t invController = localPlayer ? *(uintptr_t*)(localPlayer + OFFSET_INVENTORY_CONTROLLER) : 0;
+        uintptr_t inventory = invController ? *(uintptr_t*)(invController + OFFSET_INVENTORY) : 0;
+        uintptr_t equipment = inventory ? *(uintptr_t*)(inventory + OFFSET_EQUIPMENT) : 0;
+        if (!equipment) return false;
+
+        // Resolve Equipment.GetSlot(EquipmentSlot)
+        Il2CppClass* eqClass = il2cpp_object_get_class ? il2cpp_object_get_class((void*)equipment) : nullptr;
+        if (!eqClass || !il2cpp_class_get_methods || !il2cpp_method_get_name) return false;
+
+        const Il2CppMethod* getSlot = nullptr;
+        void* iter = nullptr;
+        while (const Il2CppMethod* m = il2cpp_class_get_methods(eqClass, &iter))
+        {
+            const char* nm = il2cpp_method_get_name(m);
+            if (nm && strcmp(nm, "GetSlot") == 0)
+            {
+                uint32_t pc = il2cpp_method_get_param_count ? il2cpp_method_get_param_count(m) : 0;
+                if (pc == 1)
+                {
+                    getSlot = m;
+                    break;
+                }
+            }
+        }
+        if (!getSlot) return false;
+
+        int32_t slotEnum = slotId;
+        void* argsSlot[] = { &slotEnum };
+        void* exc = nullptr;
+        void* slotObj = il2cpp_runtime_invoke(getSlot, (void*)equipment, argsSlot, &exc);
+        if (exc || !slotObj) return false;
+
+        Il2CppClass* slotClass = il2cpp_object_get_class ? il2cpp_object_get_class(slotObj) : nullptr;
+        if (!slotClass || !il2cpp_class_get_methods || !il2cpp_method_get_name) return false;
+
+        // Check if slot already has an item - don't spawn if occupied
+        auto findMethodByName = [&](const char* name) -> const Il2CppMethod*
+            {
+                void* it2 = nullptr;
+                while (const Il2CppMethod* m = il2cpp_class_get_methods(slotClass, &it2))
+                {
+                    const char* nm = il2cpp_method_get_name(m);
+                    if (nm && strcmp(nm, name) == 0)
+                        return m;
+                }
+                return nullptr;
+            };
+
+        const Il2CppMethod* getContained = findMethodByName("get_ContainedItem");
+        if (getContained)
+        {
+            void* exc = nullptr;
+            void* existing = il2cpp_runtime_invoke(getContained, slotObj, nullptr, &exc);
+            if (!exc && existing)
+            {
+                printf("[-] Slot already occupied, cannot spawn item\n");
+                return false;
+            }
+        }
+
+        const Il2CppMethod* addMethod = nullptr;
+        iter = nullptr;
+        while (const Il2CppMethod* m = il2cpp_class_get_methods(slotClass, &iter))
+        {
+            const char* nm = il2cpp_method_get_name(m);
+            if (nm && strcmp(nm, "Add") == 0)
+            {
+                uint32_t pc = il2cpp_method_get_param_count ? il2cpp_method_get_param_count(m) : 0;
+                if (pc == 3 || pc == 2)
+                {
+                    addMethod = m;
+                    break;
+                }
+            }
+        }
+        if (!addMethod) return false;
+
+        auto tryAdd = [&]() -> bool
+            {
+                uint32_t pcAdd = il2cpp_method_get_param_count ? il2cpp_method_get_param_count(addMethod) : 0;
+                void* excAdd = nullptr;
+                void* ret = nullptr;
+                if (pcAdd == 3)
+                {
+                    bool simulate = false;
+                    bool check = false;
+                    void* argsAdd[] = { item, &simulate, &check };
+                    ret = il2cpp_runtime_invoke(addMethod, slotObj, argsAdd, &excAdd);
+                }
+                else if (pcAdd == 2)
+                {
+                    bool simulate = false;
+                    void* argsAdd[] = { item, &simulate };
+                    ret = il2cpp_runtime_invoke(addMethod, slotObj, argsAdd, &excAdd);
+                }
+                else
+                {
+                    return false;
+                }
+
+                if (excAdd) return false;
+                bool ok = true;
+                if (ret && il2cpp_object_unbox)
+                    ok = *(bool*)il2cpp_object_unbox(ret);
+                else if (!ret)
+                    ok = false;
+                return ok;
+            };
+
+        if (tryAdd())
+        {
+            *(int32_t*)((uintptr_t)item + OFFSET_STACK_OBJECTS_COUNT) = 1;
+            *(uint8_t*)((uintptr_t)item + OFFSET_SPAWNED_IN_SESSION) = 1;
+            return true;
+        }
+
+        // Fallback: remove existing item then add again
+        const Il2CppMethod* getContained2 = findMethodByName("get_ContainedItem");
+        void* contained = nullptr;
+        if (getContained2)
+        {
+            void* exc = nullptr;
+            contained = il2cpp_runtime_invoke(getContained2, slotObj, nullptr, &exc);
+            if (exc) contained = nullptr;
+        }
+
+        if (contained)
+        {
+            const Il2CppMethod* rem = findMethodByName("RemoveWithoutRestrictions");
+            if (!rem) rem = findMethodByName("Remove");
+            if (rem)
+            {
+                uint32_t pcRem = il2cpp_method_get_param_count ? il2cpp_method_get_param_count(rem) : 0;
+                void* excRem = nullptr;
+                if (pcRem == 1)
+                {
+                    void* argsR[] = { contained };
+                    il2cpp_runtime_invoke(rem, slotObj, argsR, &excRem);
+                }
+                else if (pcRem == 2)
+                {
+                    bool simulate = false;
+                    void* argsR[] = { contained, &simulate };
+                    il2cpp_runtime_invoke(rem, slotObj, argsR, &excRem);
+                }
+                if (excRem) contained = nullptr;
+            }
+        }
+
+        if (tryAdd())
+        {
+            *(int32_t*)((uintptr_t)item + OFFSET_STACK_OBJECTS_COUNT) = 1;
+            *(uint8_t*)((uintptr_t)item + OFFSET_SPAWNED_IN_SESSION) = 1;
+            return true;
+        }
+
+        // Last resort: set_ContainedItem directly
+        const Il2CppMethod* setContained = findMethodByName("set_ContainedItem");
+        if (setContained && il2cpp_method_get_param_count && il2cpp_method_get_param_count(setContained) == 1)
+        {
+            void* excSet = nullptr;
+            void* argsSet[] = { item };
+            il2cpp_runtime_invoke(setContained, slotObj, argsSet, &excSet);
+            if (!excSet)
+            {
+                *(int32_t*)((uintptr_t)item + OFFSET_STACK_OBJECTS_COUNT) = 1;
+                *(uint8_t*)((uintptr_t)item + OFFSET_SPAWNED_IN_SESSION) = 1;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // ========================================
+    // Public API Functions
+    // ========================================
+
+    void ProcessQueue(Il2CppImage* image)
+    {
+        TryHookInitLevel(image);
+    }
+
+    void RequestSpawn(const std::string& tplId, int count)
+    {
+        if (!IsValidTpl(tplId))
+        {
+            printf("[-] Invalid template id: %s\n", tplId.c_str());
+            return;
+        }
+
+        if (!g_CapturedItemFactory)
+        {
+            printf("[-] ItemFactory instance not captured yet (InitLevel not called?)\n");
+            return;
+        }
+
+        if (!ResolveCreateItemMethod())
+        {
+            printf("[-] CreateItem method not found\n");
+            return;
+        }
+
+        if (!il2cpp_string_new || !il2cpp_runtime_invoke)
+        {
+            printf("[-] IL2CPP API missing for spawn\n");
+            return;
+        }
+
+        for (int i = 0; i < count; ++i)
+        {
+            printf("[Spawner] invoking CreateItem this=%p fn=%p\n", g_CapturedItemFactory, *(void**)g_CreateItemMethod);
+            std::string mongo = GenerateMongoId();
+            Il2CppObject* mongoStr = il2cpp_string_new(mongo.c_str());
+            Il2CppObject* tplStr = il2cpp_string_new(tplId.c_str());
+            void* args[] = { mongoStr, tplStr, nullptr };
+            void* exc = nullptr;
+            void* res = il2cpp_runtime_invoke(g_CreateItemMethod, g_CapturedItemFactory, args, &exc);
+            if (exc || !res)
+            {
+                printf("[-] CreateItem failed tpl=%s exc=%p res=%p\n", tplId.c_str(), exc, res);
+                continue;
+            }
+
+            printf("[+] Spawned item tpl=%s res=%p\n", tplId.c_str(), res);
+            *(int32_t*)((uintptr_t)res + OFFSET_STACK_OBJECTS_COUNT) = 1;
+            *(uint8_t*)((uintptr_t)res + OFFSET_SPAWNED_IN_SESSION) = 1;
+            TryAddToBackpack(res);
+        }
+    }
+
+    void RequestSpawnToSlot(const std::string& tplId, int slotId)
+    {
+        if (!IsValidTpl(tplId))
+        {
+            printf("[-] Invalid template id: %s\n", tplId.c_str());
+            return;
+        }
+
+        if (!g_CapturedItemFactory)
+        {
+            printf("[-] ItemFactory instance not captured yet (InitLevel not called?)\n");
+            return;
+        }
+
+        if (!ResolveCreateItemMethod())
+        {
+            printf("[-] CreateItem method not found\n");
+            return;
+        }
+
+        if (!il2cpp_string_new || !il2cpp_runtime_invoke)
+        {
+            printf("[-] IL2CPP API missing for spawn\n");
+            return;
+        }
+
+        printf("[Spawner] invoking CreateItem this=%p fn=%p\n", g_CapturedItemFactory, *(void**)g_CreateItemMethod);
+        std::string mongo = GenerateMongoId();
+        Il2CppObject* mongoStr = il2cpp_string_new(mongo.c_str());
+        Il2CppObject* tplStr = il2cpp_string_new(tplId.c_str());
+        void* args[] = { mongoStr, tplStr, nullptr };
+        void* exc = nullptr;
+        void* res = il2cpp_runtime_invoke(g_CreateItemMethod, g_CapturedItemFactory, args, &exc);
+        if (exc || !res)
+        {
+            printf("[-] CreateItem failed tpl=%s exc=%p res=%p\n", tplId.c_str(), exc, res);
+            return;
+        }
+
+        printf("[+] Spawned item tpl=%s res=%p\n", tplId.c_str(), res);
+        *(int32_t*)((uintptr_t)res + OFFSET_STACK_OBJECTS_COUNT) = 1;
+        *(uint8_t*)((uintptr_t)res + OFFSET_SPAWNED_IN_SESSION) = 1;
+        TryAddToEquipmentSlot(res, slotId);
     }
 }

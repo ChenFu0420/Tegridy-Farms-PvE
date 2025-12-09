@@ -102,3 +102,19 @@ namespace FeaturePatch
     // AI Vacuum
     void TeleportAllEnemiesToMe();
 }
+
+// ========================================
+// Item Spawner System
+// Reference: ItemSpawner namespace from guide
+// ========================================
+namespace ItemSpawner
+{
+    // Initialize InitLevel hook (call during startup after IL2CPP init)
+    void ProcessQueue(Il2CppImage* image);
+
+    // Spawn item to backpack
+    void RequestSpawn(const std::string& tplId, int count);
+
+    // Spawn item to equipment slot
+    void RequestSpawnToSlot(const std::string& tplId, int slotId);
+}

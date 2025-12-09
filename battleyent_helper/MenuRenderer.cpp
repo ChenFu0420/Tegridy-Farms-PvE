@@ -239,19 +239,133 @@ namespace MenuRenderer
         ImGui::Separator();
         ImGui::Spacing();
 
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Additional Features (Coming Soon)");
+        // ========================================
+        // ITEM SPAWNER TO BACKPACK
+        // ========================================
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Item Spawner - Backpack");
         ImGui::Spacing();
 
-        // Planned features (disabled)
-        ImGui::BeginDisabled();
+        static char itemId[25] = "";
+        static int spawnCount = 1;
 
-        ImGui::Checkbox("Item Spawner", &Features::item_spawner);
+        ImGui::Text("Item ID:");
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Spawn items. (Coming Soon)");
+            ImGui::SetTooltip("24-character hex ID from https://db.sp-tarkov.com/search");
         }
+        ImGui::SetNextItemWidth(300);
+        ImGui::InputText("##ItemID", itemId, sizeof(itemId));
+
+        ImGui::Text("Count:  ");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Number of items to spawn (1-100)");
+        }
+        ImGui::SetNextItemWidth(100);
+        ImGui::InputInt("##Count", &spawnCount);
+        if (spawnCount < 1) spawnCount = 1;
+        if (spawnCount > 100) spawnCount = 100;
+
+        if (ImGui::Button("Spawn to Backpack", ImVec2(200, 30)))
+        {
+            if (strlen(itemId) == 24)
+            {
+                ItemSpawner::RequestSpawn(std::string(itemId), spawnCount);
+                printf("[ACTION] Spawning %d x %s to backpack\n", spawnCount, itemId);
+            }
+            else
+            {
+                printf("[-] Invalid item ID length (must be 24 characters)\n");
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        // ========================================
+        // ITEM SPAWNER TO EQUIPMENT SLOT
+        // ========================================
+        ImGui::TextColored(ImVec4(0.9f, 0.7f, 0.3f, 1.0f), "Item Spawner - Equipment Slot");
+        ImGui::Spacing();
+
+        static char slotItemId[25] = "";
+        static int selectedSlot = 4; // Default: Backpack
+        const char* slotNames[] = {
+            "FirstPrimaryWeapon",
+            "SecondPrimaryWeapon",
+            "Holster",
+            "Scabbard",
+            "Backpack",
+            "SecuredContainer",
+            "TacticalVest",
+            "ArmorVest",
+            "Pockets",
+            "Eyewear",
+            "FaceCover",
+            "Headwear",
+            "Earpiece",
+            "Dogtag",
+            "ArmBand"
+        };
+
+        ImGui::Text("Slot:   ");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Equipment slot to spawn item into");
+        }
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::BeginCombo("##SlotSelect", slotNames[selectedSlot]))
+        {
+            for (int i = 0; i < 15; ++i)
+            {
+                bool isSelected = (selectedSlot == i);
+                if (ImGui::Selectable(slotNames[i], isSelected))
+                    selectedSlot = i;
+                if (isSelected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::Text("Item ID:");
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("24-character hex ID from https://db.sp-tarkov.com/search");
+        }
+        ImGui::SetNextItemWidth(300);
+        ImGui::InputText("##SlotItemID", slotItemId, sizeof(slotItemId));
+
+        if (ImGui::Button("Spawn to Equipment Slot", ImVec2(200, 30)))
+        {
+            if (strlen(slotItemId) == 24)
+            {
+                ItemSpawner::RequestSpawnToSlot(std::string(slotItemId), selectedSlot);
+                printf("[ACTION] Spawning %s to slot %d (%s)\n", slotItemId, selectedSlot, slotNames[selectedSlot]);
+            }
+            else
+            {
+                printf("[-] Invalid item ID length (must be 24 characters)\n");
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Loot Vacuum (Coming Soon)");
+        ImGui::Spacing();
+
+        // Planned features (disabled)
+        ImGui::BeginDisabled();
 
         ImGui::Checkbox("Loot Vacuum", &Features::loot_vacuum);
         ImGui::SameLine();
