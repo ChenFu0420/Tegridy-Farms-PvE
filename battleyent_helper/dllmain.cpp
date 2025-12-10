@@ -5,12 +5,12 @@
 #include <cstdarg>
 #include <cstdio>
 #include <mutex>
-#include "iat_hook.h"      // REPLACED: Advapi32Patch.h with iat_hook.h
-#include "Overlay.h"
-#include "DX11Hook.h"
-#include "Menu.h"
-#include "MenuRenderer.h"
-#include "Features.h"
+#include "Utils/iat_hook.h"      // REPLACED: Advapi32Patch.h with iat_hook.h
+#include "Overlay/Overlay.h"
+#include "Utils/DX11Hook.h"
+#include "Menu/Menu.h"
+#include "Menu/MenuRenderer.h"
+#include "Features/Features.h"
 
 // =================================================================
 // 0. Logging System

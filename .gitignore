@@ -1,0 +1,5 @@
+# just vs breadcrumbs
+/.vs
+# build folder
+/battleyent_helper/x64
+

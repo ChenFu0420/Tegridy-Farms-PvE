@@ -18,13 +18,13 @@
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Overlay.cpp">
+    <ClCompile Include="Overlay\Overlay.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Menu.cpp">
+    <ClCompile Include="Menu\Menu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MenuRenderer.cpp">
+    <ClCompile Include="Menu\MenuRenderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="imgui\imgui_draw.cpp">
@@ -45,24 +45,24 @@
     <ClCompile Include="imgui\imgui.cpp">
       <Filter>Resource Files</Filter>
     </ClCompile>
-    <ClCompile Include="iat_hook.cpp">
+    <ClCompile Include="Utils\iat_hook.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Features.cpp">
+    <ClCompile Include="Features\Features.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Overlay.h">
+    <ClInclude Include="Overlay\Overlay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Features.h">
+    <ClInclude Include="Features\Features.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Menu.h">
+    <ClInclude Include="Menu\Menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="MenuRenderer.h">
+    <ClInclude Include="Menu\MenuRenderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="imgui\imgui_impl_dx11.h">
@@ -89,10 +89,10 @@
     <ClInclude Include="imgui\imgui.h">
       <Filter>Resource Files</Filter>
     </ClInclude>
-    <ClInclude Include="iat_hook.h">
+    <ClInclude Include="Utils\iat_hook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="DX11Hook.h">
+    <ClInclude Include="Utils\DX11Hook.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

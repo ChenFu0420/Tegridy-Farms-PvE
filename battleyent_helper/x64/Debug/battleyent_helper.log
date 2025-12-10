@@ -1,14 +1,7 @@
-﻿  dllmain.cpp
-  Features.cpp
-  iat_hook.cpp
-  imgui.cpp
-  imgui_draw.cpp
-  imgui_impl_dx11.cpp
-  imgui_impl_win32.cpp
-  imgui_tables.cpp
-  imgui_widgets.cpp
-  Menu.cpp
+﻿  Menu.cpp
   MenuRenderer.cpp
   Overlay.cpp
   Generating Code...
-  battleyent_helper.vcxproj -> C:\Users\Cannabusy\Desktop\Tegridy-Farms-PvE-main\x64\Debug\battleyent_helper.dll
+  battleyent_helper.vcxproj -> C:\Users\jedre\Desktop\pve\Tegridy-Farms-PvE\x64\Debug\battleyent_helper.dll
+  'pwsh.exe' is not recognized as an internal or external command,
+  operable program or batch file.
