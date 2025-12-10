@@ -161,6 +161,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Core\IL2CPP_API.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="Features\Features.cpp" />
     <ClCompile Include="Utils\iat_hook.cpp" />
@@ -175,6 +176,7 @@
     <ClCompile Include="Overlay\Overlay.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Core\IL2CPP_API.h" />
     <ClInclude Include="Utils\DX11Hook.h" />
     <ClInclude Include="Features\Features.h" />
     <ClInclude Include="Utils\iat_hook.h" />

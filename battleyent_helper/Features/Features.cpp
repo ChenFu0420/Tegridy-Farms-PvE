@@ -5,71 +5,14 @@
 #include <random>
 #include <chrono>
 #include <algorithm>
+#include "../Core/IL2CPP_API.h"
 
 // External globals from dllmain.cpp
 extern void* g_TarkovApplicationInstance;
 extern void* g_CameraManagerInstance;
 extern uintptr_t g_selectedLocation;
 
-// IL2CPP function pointer typedefs (matching dllmain.cpp)
-struct Il2CppImage;
-struct Il2CppClass;
-struct Il2CppMethod;
 
-typedef Il2CppClass* (*il2cpp_class_from_name_prot)(const Il2CppImage*, const char*, const char*);
-typedef const Il2CppMethod* (*il2cpp_class_get_methods_prot)(Il2CppClass*, void**);
-typedef const char* (*il2cpp_method_get_name_prot)(const Il2CppMethod*);
-
-// External IL2CPP function pointers from dllmain.cpp
-extern il2cpp_class_from_name_prot il2cpp_class_from_name;
-extern il2cpp_class_get_methods_prot il2cpp_class_get_methods;
-extern il2cpp_method_get_name_prot il2cpp_method_get_name;
-
-// Additional IL2CPP typedefs for AI Vacuum
-struct Il2CppObject;
-struct Il2CppField;
-struct Il2CppType;
-struct Il2CppDomain;
-struct Il2CppAssembly;
-
-typedef Il2CppImage* (*il2cpp_image_loaded_prot)(const char*);
-typedef Il2CppClass* (*il2cpp_object_get_class_prot)(void*);
-typedef void* (*il2cpp_class_get_type_prot)(Il2CppClass*);
-typedef void* (*il2cpp_type_get_object_prot)(void*);
-typedef void* (*il2cpp_runtime_invoke_prot)(const Il2CppMethod*, void*, void**, void**);
-typedef Il2CppClass* (*il2cpp_class_get_parent_prot)(Il2CppClass*);
-typedef void* (*il2cpp_class_get_fields_prot)(Il2CppClass*, void**);
-typedef const char* (*il2cpp_field_get_name_prot)(void*);
-typedef void (*il2cpp_field_get_value_prot)(void*, void*, void*);
-typedef uint32_t(*il2cpp_method_get_param_count_prot)(const Il2CppMethod*);
-typedef void* (*il2cpp_object_unbox_prot)(void*);
-typedef Il2CppObject* (*il2cpp_string_new_prot)(const char*);
-typedef uint32_t(*il2cpp_method_get_flags_prot)(const Il2CppMethod*, uint32_t*);
-
-extern il2cpp_object_get_class_prot il2cpp_object_get_class;
-extern il2cpp_class_get_type_prot il2cpp_class_get_type;
-extern il2cpp_type_get_object_prot il2cpp_type_get_object;
-extern il2cpp_runtime_invoke_prot il2cpp_runtime_invoke;
-extern il2cpp_class_get_parent_prot il2cpp_class_get_parent;
-extern il2cpp_class_get_fields_prot il2cpp_class_get_fields;
-extern il2cpp_field_get_name_prot il2cpp_field_get_name;
-extern il2cpp_field_get_value_prot il2cpp_field_get_value;
-extern il2cpp_method_get_param_count_prot il2cpp_method_get_param_count;
-extern il2cpp_object_unbox_prot il2cpp_object_unbox;
-
-// Additional exports from dllmain.cpp for Item Spawner
-extern il2cpp_string_new_prot il2cpp_string_new;
-extern il2cpp_method_get_flags_prot il2cpp_method_get_flags;
-
-// External wrapper function from dllmain.cpp
-extern Il2CppImage* il2cpp_image_loaded(const char* image_name);
-
-// External helper functions from dllmain.cpp
-extern const Il2CppMethod* FindMethod(Il2CppClass* klass, const char* methodName);
-extern void PatchBoolGetter(void* methodPtr, bool returnValue, unsigned char* savedBytes);
-extern void RestoreBoolGetter(void* methodPtr, unsigned char* savedBytes);
-extern void PatchFloatGetter(void* methodPtr, float returnValue, unsigned char* savedBytes);
-extern void RestoreFloatGetter(void* methodPtr, unsigned char* savedBytes);
 
 // ========================================
 // Feature Toggle States
@@ -103,86 +46,7 @@ namespace Features
 // Reference: AiVacuum.txt snippet
 // ========================================
 
-// Unity Vector3 Struct
-struct Vector3 {
-    float x, y, z;
-};
 
-// Simple C# Array Header Structure (IL2CPP)
-struct Il2CppArraySize {
-    void* klass;
-    void* monitor;
-    void* bounds;
-    int32_t max_length;
-};
-
-// Helper: Get C# System.Type object from class name
-void* GetSystemType(Il2CppClass* klass) {
-    if (!klass) return nullptr;
-    void* type = il2cpp_class_get_type(klass);
-    return il2cpp_type_get_object(type);
-}
-
-// Core: Get current GameWorld instance (via FindObjectOfType)
-void* GetGameWorldInstance() {
-    Il2CppImage* coreModule = il2cpp_image_loaded("UnityEngine.CoreModule.dll");
-    if (!coreModule) return nullptr;
-
-    Il2CppClass* unityObjectClass = il2cpp_class_from_name(coreModule, "UnityEngine", "Object");
-
-    const Il2CppMethod* findMethod = nullptr;
-    void* iter = nullptr;
-    while (const Il2CppMethod* m = il2cpp_class_get_methods(unityObjectClass, &iter)) {
-        if (strcmp(il2cpp_method_get_name(m), "FindObjectOfType") == 0 &&
-            il2cpp_method_get_param_count(m) == 1) {
-            findMethod = m;
-            break;
-        }
-    }
-    if (!findMethod) return nullptr;
-
-    Il2CppImage* csharpImage = il2cpp_image_loaded("Assembly-CSharp.dll");
-    Il2CppClass* gameWorldClass = il2cpp_class_from_name(csharpImage, "EFT", "GameWorld");
-    void* gameWorldType = GetSystemType(gameWorldClass);
-
-    void* args[] = { gameWorldType };
-    void* result = il2cpp_runtime_invoke(findMethod, nullptr, args, nullptr);
-
-    return result;
-}
-
-// Recursively find method in class and its parents
-const Il2CppMethod* FindMethodRecursive(Il2CppClass* klass, const char* name) {
-    if (!klass) return nullptr;
-    Il2CppClass* current = klass;
-    while (current) {
-        void* iter = nullptr;
-        while (const Il2CppMethod* m = il2cpp_class_get_methods(current, &iter)) {
-            if (strcmp(il2cpp_method_get_name(m), name) == 0) {
-                return m;
-            }
-        }
-        current = il2cpp_class_get_parent(current);
-    }
-    return nullptr;
-}
-
-// Recursively find field in class and its parents
-void* FindFieldRecursive(Il2CppClass* klass, const char* name) {
-    if (!klass) return nullptr;
-    Il2CppClass* current = klass;
-    while (current) {
-        void* iter = nullptr;
-        while (void* f = il2cpp_class_get_fields(current, &iter)) {
-            const char* fname = il2cpp_field_get_name(f);
-            if (fname && strcmp(fname, name) == 0) {
-                return f;
-            }
-        }
-        current = il2cpp_class_get_parent(current);
-    }
-    return nullptr;
-}
 
 // ========================================
 // Recoverable Patch System
@@ -618,7 +482,7 @@ namespace FeaturePatch
         // - Minefield (environment damage)
         // - SniperFiringZone (environment damage)
         // UpdateGodMode() handles continuous memory write for damage coefficient
-
+        
         if (Features::god_mode)
         {
             // Enable all god mode patches

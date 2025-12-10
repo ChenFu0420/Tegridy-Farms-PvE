@@ -11,6 +11,7 @@
 #include "Menu/Menu.h"
 #include "Menu/MenuRenderer.h"
 #include "Features/Features.h"
+#include "Core/IL2CPP_API.h"
 
 // =================================================================
 // 0. Logging System
@@ -74,84 +75,7 @@ void CloseLogging()
     }
 }
 
-// =================================================================
-// 0. IL2CPP Structs and Function Type Definitions
-// =================================================================
-typedef void (*Il2CppMethodPointer)();
-struct Il2CppDomain;
-struct Il2CppAssembly;
-struct Il2CppThread;
-struct Il2CppClass;
-struct Il2CppMethod;
-struct Il2CppImage;
-struct Il2CppObject;
-struct Il2CppField;
-struct Il2CppArray;
 
-// IL2CPP API Function Pointer Type Definitions
-using il2cpp_get_root_domain_prot = Il2CppDomain * (*)();
-static il2cpp_get_root_domain_prot il2cpp_get_root_domain = nullptr;
-
-using il2cpp_thread_attach_prot = Il2CppThread * (*)(Il2CppDomain*);
-static il2cpp_thread_attach_prot il2cpp_thread_attach = nullptr;
-
-using il2cpp_domain_get_assemblies_prot = const Il2CppAssembly** (*)(Il2CppDomain*, size_t*);
-static il2cpp_domain_get_assemblies_prot il2cpp_domain_get_assemblies = nullptr;
-
-using il2cpp_class_from_name_prot = Il2CppClass * (*)(const Il2CppImage*, const char*, const char*);
-il2cpp_class_from_name_prot il2cpp_class_from_name = nullptr;
-
-using il2cpp_class_get_methods_prot = const Il2CppMethod* (*)(Il2CppClass*, void**);
-il2cpp_class_get_methods_prot il2cpp_class_get_methods = nullptr;
-
-using il2cpp_method_get_name_prot = const char* (*)(const Il2CppMethod*);
-il2cpp_method_get_name_prot il2cpp_method_get_name = nullptr;
-
-using il2cpp_assembly_get_image_prot = const Il2CppImage* (*)(const Il2CppAssembly*);
-static il2cpp_assembly_get_image_prot il2cpp_assembly_get_image = nullptr;
-
-using il2cpp_image_get_name_prot = const char* (*)(const Il2CppImage*);
-static il2cpp_image_get_name_prot il2cpp_image_get_name = nullptr;
-
-using il2cpp_runtime_invoke_prot = void* (*)(const Il2CppMethod*, void*, void**, void**);
-il2cpp_runtime_invoke_prot il2cpp_runtime_invoke = nullptr;
-
-using il2cpp_string_new_prot = Il2CppObject * (*)(const char*);
-using il2cpp_method_get_flags_prot = uint32_t(*)(const Il2CppMethod*, uint32_t*);
-
-// Additional IL2CPP function pointers for AI Vacuum
-using il2cpp_object_get_class_prot = Il2CppClass * (*)(void*);
-il2cpp_object_get_class_prot il2cpp_object_get_class = nullptr;
-
-using il2cpp_class_get_type_prot = void* (*)(Il2CppClass*);
-il2cpp_class_get_type_prot il2cpp_class_get_type = nullptr;
-
-using il2cpp_type_get_object_prot = void* (*)(void*);
-il2cpp_type_get_object_prot il2cpp_type_get_object = nullptr;
-
-using il2cpp_class_get_parent_prot = Il2CppClass * (*)(Il2CppClass*);
-il2cpp_class_get_parent_prot il2cpp_class_get_parent = nullptr;
-
-using il2cpp_class_get_fields_prot = void* (*)(Il2CppClass*, void**);
-il2cpp_class_get_fields_prot il2cpp_class_get_fields = nullptr;
-
-using il2cpp_field_get_name_prot = const char* (*)(void*);
-il2cpp_field_get_name_prot il2cpp_field_get_name = nullptr;
-
-using il2cpp_field_get_value_prot = void (*)(void*, void*, void*);
-il2cpp_field_get_value_prot il2cpp_field_get_value = nullptr;
-
-using il2cpp_method_get_param_count_prot = uint32_t(*)(const Il2CppMethod*);
-il2cpp_method_get_param_count_prot il2cpp_method_get_param_count = nullptr;
-
-using il2cpp_object_unbox_prot = void* (*)(void*);
-il2cpp_object_unbox_prot il2cpp_object_unbox = nullptr;
-
-using il2cpp_string_new_prot = Il2CppObject * (*)(const char*);
-il2cpp_string_new_prot il2cpp_string_new = nullptr;
-
-using il2cpp_method_get_flags_prot = uint32_t(*)(const Il2CppMethod*, uint32_t*);
-il2cpp_method_get_flags_prot il2cpp_method_get_flags = nullptr;
 
 // =================================================================
 // 1. Global Variables
@@ -245,179 +169,6 @@ void log_info(const char* fmt, ...)
     va_end(args);
 }
 
-/**
- * @brief Find methods by name
- */
-void find_methods_by_names(Il2CppClass* klass, const std::vector<std::string>& names)
-{
-    found_methods.clear();
-    if (!klass) return;
-
-    void* iter = nullptr;
-    const Il2CppMethod* method;
-
-    while ((method = il2cpp_class_get_methods(klass, &iter)))
-    {
-        const char* mname = il2cpp_method_get_name(method);
-        if (!mname) continue;
-
-        for (const auto& target : names)
-        {
-            if (strcmp(mname, target.c_str()) == 0)
-            {
-                found_methods.push_back(method);
-            }
-        }
-    }
-}
-
-/**
- * @brief Load IL2CPP image by name
- */
-Il2CppImage* il2cpp_image_loaded(const char* image_name)
-{
-    Il2CppDomain* domain = il2cpp_get_root_domain();
-    if (!domain) return nullptr;
-
-    size_t size = 0;
-    const Il2CppAssembly* const* asmbl = il2cpp_domain_get_assemblies(domain, &size);
-    if (!asmbl) return nullptr;
-
-    for (size_t i = 0; i < size; i++)
-    {
-        const Il2CppImage* img = il2cpp_assembly_get_image(asmbl[i]);
-        if (!img) continue;
-
-        const char* nm = il2cpp_image_get_name(img);
-        if (!nm) continue;
-
-        if (_stricmp(nm, image_name) == 0)
-            return (Il2CppImage*)img;
-    }
-
-    return nullptr;
-}
-
-/**
- * @brief Find single IL2CPP method by name
- */
-const Il2CppMethod* FindMethod(Il2CppClass* klass, const char* methodName)
-{
-    if (!klass || !methodName) return nullptr;
-
-    void* iter = nullptr;
-    const Il2CppMethod* method;
-
-    while ((method = il2cpp_class_get_methods(klass, &iter)))
-    {
-        const char* name = il2cpp_method_get_name(method);
-        if (name && strcmp(name, methodName) == 0)
-        {
-            return method;
-        }
-    }
-
-    return nullptr;
-}
-
-/**
- * @brief Patch bool getter to return specific value
- */
-void PatchBoolGetter(void* methodPtr, bool returnValue, unsigned char* savedBytes)
-{
-    if (!methodPtr) return;
-
-    DWORD oldProtect;
-    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return;
-
-    // Save original bytes
-    if (savedBytes)
-    {
-        memcpy(savedBytes, methodPtr, 16);
-    }
-
-    uint8_t* code = (uint8_t*)methodPtr;
-    code[0] = 0xB0;                 // mov al, imm8
-    code[1] = returnValue ? 1 : 0;
-    code[2] = 0xC3;                 // ret
-
-    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
-}
-
-/**
- * @brief Restore bool getter original bytes
- */
-void RestoreBoolGetter(void* methodPtr, unsigned char* savedBytes)
-{
-    if (!methodPtr || !savedBytes) return;
-
-    DWORD oldProtect;
-    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return;
-
-    memcpy(methodPtr, savedBytes, 16);
-
-    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
-}
-
-/**
- * @brief Patch float getter to return specific value
- */
-void PatchFloatGetter(void* methodPtr, float returnValue, unsigned char* savedBytes)
-{
-    if (!methodPtr) return;
-
-    DWORD oldProtect;
-    if (!VirtualProtect(methodPtr, 32, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return;
-
-    // Save original bytes
-    if (savedBytes)
-    {
-        memcpy(savedBytes, methodPtr, 16);
-    }
-
-    static float forced_value = 0.0f;
-    forced_value = returnValue;
-
-    uint8_t stub[32];
-    memset(stub, 0x90, sizeof(stub));
-    stub[0] = 0x48;
-    stub[1] = 0xB8;
-    uint64_t addr = (uint64_t)&forced_value;
-    memcpy(&stub[2], &addr, sizeof(addr));
-    int idx = 2 + (int)sizeof(addr);
-    stub[idx++] = 0xF3;
-    stub[idx++] = 0x0F;
-    stub[idx++] = 0x10;
-    stub[idx++] = 0x00;
-    stub[idx++] = 0xC3;
-
-    memcpy(methodPtr, stub, idx);
-
-    VirtualProtect(methodPtr, 32, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), methodPtr, 32);
-}
-
-/**
- * @brief Restore float getter original bytes
- */
-void RestoreFloatGetter(void* methodPtr, unsigned char* savedBytes)
-{
-    if (!methodPtr || !savedBytes) return;
-
-    DWORD oldProtect;
-    if (!VirtualProtect(methodPtr, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
-        return;
-
-    memcpy(methodPtr, savedBytes, 16);
-
-    VirtualProtect(methodPtr, 16, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), methodPtr, 16);
-}
 
 /**
  * @brief Safe version with waiting
@@ -779,6 +530,12 @@ void start()
             (Features::lucky_search != prev_lucky_search);
 
         // Apply features when CameraManager exists and (first time OR features changed)
+
+
+
+
+        // THIS IS NOT GUD, THE OR SHOULD NOT BE THERE, IT SHOULD BE AND SO &&
+        /*
         if (cm && (!patchesInitialized || featuresChanged))
         {
             if (!patchesInitialized)
@@ -789,6 +546,19 @@ void start()
 
             // Apply all enabled features
             FeaturePatch::ApplyAllEnabledFeatures(image);
+            */
+
+        if (cm && !patchesInitialized)
+        {
+            WriteLog("[*] Game ready - features can now be toggled via menu\n\n");
+            patchesInitialized = true;
+        }
+
+        if (cm && patchesInitialized && featuresChanged)
+        {
+            FeaturePatch::ApplyAllEnabledFeatures(image);
+
+
 
             // Update previous states
             prev_god_mode = Features::god_mode;
