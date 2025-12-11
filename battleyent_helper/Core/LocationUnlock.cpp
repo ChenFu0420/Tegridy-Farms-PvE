@@ -6,59 +6,14 @@
 // External globals
 extern void* g_TarkovApplicationInstance;
 
-// Helper to safely check if memory is readable
-static inline bool IsSafeToRead(void* ptr, size_t size)
-{
-    if (!ptr) return false;
 
-    __try
-    {
-        MEMORY_BASIC_INFORMATION mbi = {};
-        if (VirtualQuery(ptr, &mbi, sizeof(mbi)))
-        {
-            if (mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))
-            {
-                // Additional bounds check
-                volatile char test = *(char*)ptr;
-                return true;
-            }
-        }
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        return false;
-    }
-
-    return false;
-}
-
-// Helper to safely write memory
-static inline bool SafeMemWrite(void* address, const void* data, size_t size)
-{
-    if (!address || !data) return false;
-
-    __try
-    {
-        DWORD oldProtect;
-        if (!VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &oldProtect))
-            return false;
-
-        memcpy(address, data, size);
-        VirtualProtect(address, size, oldProtect, &oldProtect);
-        return true;
-    }
-    __except (EXCEPTION_EXECUTE_HANDLER)
-    {
-        return false;
-    }
-}
-
-// Helper namespace for patch operations
 namespace PatchHelpers
 {
+
+    // these are specific for locations, maybe redundant, will fix later ughhhhhh
     void PatchBoolGetter(const char* name, void* fn, bool value)
     {
-        if (!fn || !IsSafeToRead(fn, 16)) return;
+        if (!fn) return;
 
         DWORD oldProtect;
         if (!VirtualProtect(fn, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
@@ -75,7 +30,7 @@ namespace PatchHelpers
 
     void PatchIntGetter(const char* name, void* fn, int value)
     {
-        if (!fn || !IsSafeToRead(fn, 16)) return;
+        if (!fn) return;
 
         DWORD oldProtect;
         if (!VirtualProtect(fn, 16, PAGE_EXECUTE_READWRITE, &oldProtect))
@@ -92,7 +47,7 @@ namespace PatchHelpers
 
     void PatchBytes(const char* name, void* fn, const uint8_t* bytes, size_t size)
     {
-        if (!fn || !IsSafeToRead(fn, size)) return;
+        if (!fn) return;
 
         DWORD oldProtect;
         if (!VirtualProtect(fn, size, PAGE_EXECUTE_READWRITE, &oldProtect))
@@ -107,307 +62,355 @@ namespace PatchHelpers
 
 namespace LocationUnlock
 {
+    // Use the reference implementation's approach
+    static inline bool IsBadReadPtr(void* ptr, size_t size)
+    {
+        if (!ptr) return true;
+
+        MEMORY_BASIC_INFORMATION mbi = {};
+        if (!VirtualQuery(ptr, &mbi, sizeof(mbi)))
+            return true;
+
+        if (mbi.State != MEM_COMMIT)
+            return true;
+
+        if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+            return true;
+
+        return false;
+    }
+
     void ForceUnlockLocationFields(void* loc)
     {
-        if (!loc || !IsSafeToRead(loc, 0x200))
+        if (!loc || IsBadReadPtr(loc, 0x200))
         {
+            printf("[-] Invalid location pointer or not readable\n");
             return;
         }
 
-        __try
-        {
-            // Read current values first
-            printf("[*] Current location field values:\n");
-            bool currentEnabled = *(bool*)((uintptr_t)loc + 0x30);
-            bool currentLocked = *(bool*)((uintptr_t)loc + 0x34);
-            bool currentLockedByQuest = *(bool*)((uintptr_t)loc + 0x35);
-            int32_t currentMinLevel = *(int32_t*)((uintptr_t)loc + 0x54);
-            int32_t currentMaxLevel = *(int32_t*)((uintptr_t)loc + 0x58);
-            bool currentDisabledForScav = *(bool*)((uintptr_t)loc + 0x171);
-            void* currentAccessKeys = *(void**)((uintptr_t)loc + 0x1c8);
-            int32_t currentMinPlayerLvl = *(int32_t*)((uintptr_t)loc + 0x1d0);
+        // Offsets from NoNamespace.cs Location class - direct memory write
+        *(bool*)((uintptr_t)loc + 0x30) = true;      // Enabled
+        *(bool*)((uintptr_t)loc + 0x34) = false;     // Locked
+        *(bool*)((uintptr_t)loc + 0x35) = false;     // LockedByQuest
+        *(int32_t*)((uintptr_t)loc + 0x54) = 1;      // RequiredPlayerLevelMin
+        *(int32_t*)((uintptr_t)loc + 0x58) = 100;    // RequiredPlayerLevelMax
+        *(bool*)((uintptr_t)loc + 0x171) = false;    // DisabledForScav
+        *(void**)((uintptr_t)loc + 0x1c8) = nullptr; // AccessKeys
+        *(int32_t*)((uintptr_t)loc + 0x1d0) = 0;     // MinPlayerLvlAccessKeys
 
-            printf("  Enabled: %d\n", currentEnabled);
-            printf("  Locked: %d\n", currentLocked);
-            printf("  LockedByQuest: %d\n", currentLockedByQuest);
-            printf("  RequiredPlayerLevelMin: %d\n", currentMinLevel);
-            printf("  RequiredPlayerLevelMax: %d\n", currentMaxLevel);
-            printf("  DisabledForScav: %d\n", currentDisabledForScav);
-            printf("  AccessKeys: 0x%p\n", currentAccessKeys);
-            printf("  MinPlayerLvlAccessKeys: %d\n", currentMinPlayerLvl);
-
-            // Offsets from NoNamespace.cs Location class - write safely
-            bool trueVal = true;
-            bool falseVal = false;
-            int32_t minLevel = 1;
-            int32_t maxLevel = 100;
-            int32_t zeroVal = 0;
-            void* nullPtr = nullptr;
-
-            printf("[*] Patching location fields...\n");
-            SafeMemWrite((void*)((uintptr_t)loc + 0x30), &trueVal, sizeof(bool));      // Enabled
-            SafeMemWrite((void*)((uintptr_t)loc + 0x34), &falseVal, sizeof(bool));     // Locked
-            SafeMemWrite((void*)((uintptr_t)loc + 0x35), &falseVal, sizeof(bool));     // LockedByQuest
-            SafeMemWrite((void*)((uintptr_t)loc + 0x54), &minLevel, sizeof(int32_t));  // RequiredPlayerLevelMin
-            SafeMemWrite((void*)((uintptr_t)loc + 0x58), &maxLevel, sizeof(int32_t));  // RequiredPlayerLevelMax
-            SafeMemWrite((void*)((uintptr_t)loc + 0x171), &falseVal, sizeof(bool));    // DisabledForScav
-            SafeMemWrite((void*)((uintptr_t)loc + 0x1c8), &nullPtr, sizeof(void*));    // AccessKeys
-            SafeMemWrite((void*)((uintptr_t)loc + 0x1d0), &zeroVal, sizeof(int32_t));  // MinPlayerLvlAccessKeys
-
-            printf("[+] Location fields patched successfully\n");
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            printf("[-] Exception in ForceUnlockLocationFields\n");
-        }
     }
 
     void UpdateRaidSelectedLocation(Il2CppImage* image)
     {
-        __try
+        if (!g_TarkovApplicationInstance)
+            return;
+
+        // Read RaidSettings pointer from TarkovApplication + 0xD0
+        uintptr_t raidSettings = *(uintptr_t*)((uintptr_t)g_TarkovApplicationInstance + OFFSET_RAID_SETTINGS);
+        if (!raidSettings || IsBadReadPtr((void*)raidSettings, 0x200))
+            return;
+
+        // Read SelectedLocation pointer from RaidSettings + 0xA8
+        uintptr_t selectedLocation = *(uintptr_t*)(raidSettings + OFFSET_SELECTED_LOCATION);
+
+        // Check if location changed
+        if (selectedLocation && !IsBadReadPtr((void*)selectedLocation, 0x200) && g_selectedLocation != selectedLocation)
         {
-            if (!g_TarkovApplicationInstance || !IsSafeToRead(g_TarkovApplicationInstance, 0x200))
-                return;
 
-            // Read RaidSettings pointer from TarkovApplication + 0xD0
-            uintptr_t raidSettings = 0;
-            if (!SafeMemWrite(&raidSettings, (void*)((uintptr_t)g_TarkovApplicationInstance + OFFSET_RAID_SETTINGS), sizeof(uintptr_t)))
-                return;
+            // IMPORTANT: Set offline raid flags CORRECTLY
+            // Both false = normal behavior (let server decide)
+            // ForceOfflineRaid = true = force offline
+            *(bool*)(selectedLocation + OFFSET_FORCE_ONLINE_RAID) = false;
+            *(bool*)(selectedLocation + OFFSET_FORCE_OFFLINE_RAID) = true;
 
-            if (!raidSettings || !IsSafeToRead((void*)raidSettings, 0x200))
-                return;
+            // Force unlock selected location fields
+            ForceUnlockLocationFields((void*)selectedLocation);
 
-            // Read SelectedLocation pointer from RaidSettings + 0xA8
-            uintptr_t selectedLocation = 0;
-            memcpy(&selectedLocation, (void*)(raidSettings + OFFSET_SELECTED_LOCATION), sizeof(uintptr_t));
 
-            // Check if location changed
-            if (selectedLocation && IsSafeToRead((void*)selectedLocation, 0x200) && g_selectedLocation != selectedLocation)
-            {
-                printf("[+] SelectedLocation = 0x%llX\n", selectedLocation);
 
-                // Force unlock selected location fields
-                ForceUnlockLocationFields((void*)selectedLocation);
-
-                printf("[+] Updated fields for selected location\n");
-
-                // Update tracked location
-                g_selectedLocation = selectedLocation;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            printf("[-] Exception in UpdateRaidSelectedLocation\n");
+            // Update tracked location
+            g_selectedLocation = selectedLocation;
         }
     }
 
     void ApplyUnlockLocations(Il2CppImage* image)
     {
-        __try
+        printf("[*] Applying permanent location unlock patches...\n");
+        printf("[*] NO EXCLUSIONS - All maps will be unlocked\n");
+
+        if (!image)
         {
-            printf("[*] Applying permanent location unlock patches...\n");
-            printf("[*] NO EXCLUSIONS - All maps will be unlocked\n");
+            printf("[-] Image is null, cannot apply patches\n");
+            return;
+        }
 
-            if (!image)
+        // Patch MatchMakerSelectionLocationScreen visibility checks
+        Il2CppClass* mmScreen = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI.Matchmaker", "MatchMakerSelectionLocationScreen");
+        if (!mmScreen)
+        {
+            printf("[-] MatchMakerSelectionLocationScreen not found\n");
+            return;
+        }
+
+        auto patchBoolRet = [&](const char* name, bool value)
             {
-                printf("[-] Image is null, cannot apply patches\n");
-                return;
-            }
-
-            // Patch MatchMakerSelectionLocationScreen visibility checks
-            Il2CppClass* mmScreen = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI.Matchmaker", "MatchMakerSelectionLocationScreen");
-            if (!mmScreen)
-            {
-                printf("[-] MatchMakerSelectionLocationScreen not found\n");
-                return;
-            }
-
-            auto patchBoolRet = [&](const char* name, bool value)
+                const Il2CppMethod* m = FindMethodRecursive(mmScreen, name);
+                if (!m)
                 {
-                    const Il2CppMethod* m = FindMethodRecursive(mmScreen, name);
-                    if (!m)
+                    void* iter2 = nullptr;
+                    while (const Il2CppMethod* mm = il2cpp_class_get_methods(mmScreen, &iter2))
                     {
-                        void* iter2 = nullptr;
-                        while (const Il2CppMethod* mm = il2cpp_class_get_methods(mmScreen, &iter2))
-                        {
-                            const char* n = il2cpp_method_get_name(mm);
-                            if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
-                        }
-                    }
-                    if (!m) { printf("[-] %s not found on MatchMakerSelectionLocationScreen\n", name); return; }
-                    void* fn = *(void**)m;
-                    if (!fn) { printf("[-] %s ptr null\n", name); return; }
-                    PatchHelpers::PatchBoolGetter("UnlockLocations", fn, value);
-                    printf("[+] %s patched => %s\n", name, value ? "true" : "false");
-                };
-
-            // Always display and allow selection
-            patchBoolRet("DisplayLocation", true);
-            patchBoolRet("AvailableByLevel", true);
-            patchBoolRet("AvailableBySide", true);
-            patchBoolRet("CanDisplayAcceptButton", true);
-            patchBoolRet("GetCoopBlockReason", false);
-
-            // Stop locking individual buttons
-            Il2CppClass* locButton = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI", "LocationButton");
-            if (locButton)
-            {
-                auto patchRet = [&](const char* name)
-                    {
-                        const Il2CppMethod* m = FindMethodRecursive(locButton, name);
-                        if (!m) return;
-                        void* fn = *(void**)m;
-                        if (!fn) return;
-                        const uint8_t retOnly[1] = { 0xC3 };
-                        PatchHelpers::PatchBytes("UnlockLocations", fn, retOnly, sizeof(retOnly));
-                        printf("[+] %s patched => ret\n", name);
-                    };
-                patchRet("HandleOnlineModeToggle");
-                patchRet("SetSpecial");
-                patchRet("SetDefault");
-                patchRet("ShowUnavailableOverlay");
-                patchRet("SetLocked");
-                patchRet("set_interactable");
-
-                // Force empty unavailable text
-                const Il2CppMethod* mTxt = FindMethodRecursive(locButton, "GetUnavailableText");
-                if (mTxt)
-                {
-                    void* fn = *(void**)mTxt;
-                    if (fn)
-                    {
-                        const uint8_t code[2] = { 0x33, 0xC0 }; // xor eax,eax
-                        PatchHelpers::PatchBytes("UnlockLocations", fn, code, sizeof(code));
-                        printf("[+] GetUnavailableText patched => null\n");
+                        const char* n = il2cpp_method_get_name(mm);
+                        if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
                     }
                 }
-            }
+                if (!m) { printf("[-] %s not found on MatchMakerSelectionLocationScreen\n", name); return; }
+                void* fn = *(void**)m;
+                if (!fn) { printf("[-] %s ptr null\n", name); return; }
+                PatchHelpers::PatchBoolGetter("UnlockLocations", fn, value);
+                printf("[+] %s patched => %s\n", name, value ? "true" : "false");
+            };
 
-            // BaseGroupPanel: ensure in-raid button not blocked
-            Il2CppClass* baseGroupPanel = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI.Matchmaker", "BaseGroupPanel");
-            if (baseGroupPanel)
+        // Always display and allow selection
+        patchBoolRet("DisplayLocation", true);
+        patchBoolRet("AvailableByLevel", true);
+        patchBoolRet("AvailableBySide", true);
+        patchBoolRet("CanDisplayAcceptButton", true);
+        patchBoolRet("GetCoopBlockReason", false);
+
+        // Stop locking individual buttons
+        Il2CppClass* locButton = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI", "LocationButton");
+        if (locButton)
+        {
+            auto patchRet = [&](const char* name)
+                {
+                    const Il2CppMethod* m = FindMethodRecursive(locButton, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    const uint8_t retOnly[1] = { 0xC3 };
+                    PatchHelpers::PatchBytes("UnlockLocations", fn, retOnly, sizeof(retOnly));
+                    printf("[+] %s patched => ret\n", name);
+                };
+            patchRet("HandleOnlineModeToggle");
+            patchRet("SetSpecial");
+            patchRet("SetDefault");
+            patchRet("ShowUnavailableOverlay");
+            patchRet("SetLocked");
+            patchRet("set_interactable");
+
+            // Force empty unavailable text
+            const Il2CppMethod* mTxt = FindMethodRecursive(locButton, "GetUnavailableText");
+            if (mTxt)
             {
+                void* fn = *(void**)mTxt;
+                if (fn)
+                {
+                    const uint8_t code[2] = { 0x33, 0xC0 }; // xor eax,eax
+                    PatchHelpers::PatchBytes("UnlockLocations", fn, code, sizeof(code));
+                    printf("[+] GetUnavailableText patched => null\n");
+                }
+            }
+        }
+
+        // BaseGroupPanel: ensure in-raid button not blocked
+        Il2CppClass* baseGroupPanel = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI.Matchmaker", "BaseGroupPanel");
+        if (baseGroupPanel)
+        {
+            auto patchBool = [&](const char* name, bool val)
+                {
+                    const Il2CppMethod* m = FindMethodRecursive(baseGroupPanel, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    PatchHelpers::PatchBoolGetter("UnlockLocations", fn, val);
+                    printf("[+] %s patched => %s\n", name, val ? "true" : "false");
+                };
+
+            auto patchRet = [&](const char* name)
+                {
+                    const Il2CppMethod* m = FindMethodRecursive(baseGroupPanel, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    const uint8_t retOnly[1] = { 0xC3 };
+                    PatchHelpers::PatchBytes("UnlockLocations", fn, retOnly, sizeof(retOnly));
+                    printf("[+] %s patched => ret\n", name);
+                };
+
+            patchBool("get_CanShowInRaidButton", true);
+            patchRet("SetGroupsAvailability");
+            patchRet("IsLocationAvailable");
+            patchRet("UpdateRaidReadyButton");
+        }
+
+        // Patch Location class getters directly
+        auto patchLocationClass = [&](const char* nsName, const char* className)
+            {
+                Il2CppClass* locCls = (Il2CppClass*)il2cpp_class_from_name(image, nsName, className);
+                if (!locCls) return false;
+
                 auto patchBool = [&](const char* name, bool val)
                     {
-                        const Il2CppMethod* m = FindMethodRecursive(baseGroupPanel, name);
+                        const Il2CppMethod* m = FindMethodRecursive(locCls, name);
+                        if (!m)
+                        {
+                            void* it = nullptr;
+                            while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
+                            {
+                                const char* n = il2cpp_method_get_name(mm);
+                                if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
+                            }
+                        }
                         if (!m) return;
                         void* fn = *(void**)m;
                         if (!fn) return;
                         PatchHelpers::PatchBoolGetter("UnlockLocations", fn, val);
-                        printf("[+] %s patched => %s\n", name, val ? "true" : "false");
+                        printf("[+] %s.%s patched %s => %s\n", nsName, className, il2cpp_method_get_name(m), val ? "true" : "false");
                     };
 
-                auto patchRet = [&](const char* name)
+                auto patchInt = [&](const char* name, int val)
                     {
-                        const Il2CppMethod* m = FindMethodRecursive(baseGroupPanel, name);
+                        const Il2CppMethod* m = FindMethodRecursive(locCls, name);
+                        if (!m)
+                        {
+                            void* it = nullptr;
+                            while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
+                            {
+                                const char* n = il2cpp_method_get_name(mm);
+                                if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
+                            }
+                        }
                         if (!m) return;
                         void* fn = *(void**)m;
                         if (!fn) return;
-                        const uint8_t retOnly[1] = { 0xC3 };
-                        PatchHelpers::PatchBytes("UnlockLocations", fn, retOnly, sizeof(retOnly));
-                        printf("[+] %s patched => ret\n", name);
+                        PatchHelpers::PatchIntGetter("UnlockLocations", fn, val);
+                        printf("[+] %s.%s patched %s => %d\n", nsName, className, il2cpp_method_get_name(m), val);
                     };
 
-                patchBool("get_CanShowInRaidButton", true);
-                patchRet("SetGroupsAvailability");
-                patchRet("IsLocationAvailable");
-                patchRet("UpdateRaidReadyButton");
-            }
+                auto patchNullRet = [&](const char* name)
+                    {
+                        const Il2CppMethod* m = FindMethodRecursive(locCls, name);
+                        if (!m)
+                        {
+                            void* it = nullptr;
+                            while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
+                            {
+                                const char* n = il2cpp_method_get_name(mm);
+                                if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
+                            }
+                        }
+                        if (!m) return;
+                        void* fn = *(void**)m;
+                        if (!fn) return;
+                        const uint8_t code[2] = { 0x33, 0xC0 }; // xor eax,eax
+                        PatchHelpers::PatchBytes("UnlockLocations", fn, code, sizeof(code));
+                        printf("[+] %s.%s patched %s => null\n", nsName, className, il2cpp_method_get_name(m));
+                    };
 
-            // Patch Location class getters directly
-            auto patchLocationClass = [&](const char* nsName, const char* className)
+                patchBool("get_Enabled", true);
+                patchBool("get_Locked", false);
+                patchBool("get_IsDiscovered", true);
+                patchBool("get_LockedByQuest", false);
+                patchBool("get_DisabledForScav", false);
+
+                patchBool("get_ForceOnlineRaidInPVE", false);  // Don't force online
+                patchBool("get_ForceOfflineRaidInPVE", true);   // DO force offline
+                                                                // yes, these are retarded comments, I am on 1 hour of sleep and 2 monster cans
+                patchInt("get_RequiredPlayerLevelMin", 1);
+                patchInt("get_RequiredPlayerLevelMax", 100);
+                patchInt("get_MinPlayerLvlAccessKeys", 0);
+                patchNullRet("get_AccessKeys");
+                return true;
+            };
+
+        if (!patchLocationClass("JsonType", "LocationSettings/Location"))
+        {
+            patchLocationClass("", "Location"); // fallback
+        }
+
+        // FFS, JUST KILL ME ALREADY: Unlock routes/exits after location patches
+        UnlockLocationRoutes(image);
+
+
+    }
+
+    void UnlockLocationRoutes(Il2CppImage* image)
+    {
+        // Routes are controlled by LocationSelectView and TravelRoute classes
+        printf("[*] Unlocking location routes/exits...\n");
+
+        // Patch LocationSelectView (controls route selection UI)
+        Il2CppClass* locSelectView = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI.Matchmaker", "LocationSelectView");
+        if (locSelectView)
+        {
+            auto patchBool = [&](const char* name, bool val)
                 {
-                    Il2CppClass* locCls = (Il2CppClass*)il2cpp_class_from_name(image, nsName, className);
-                    if (!locCls) return false;
-
-                    auto patchBool = [&](const char* name, bool val)
-                        {
-                            const Il2CppMethod* m = FindMethodRecursive(locCls, name);
-                            if (!m)
-                            {
-                                void* it = nullptr;
-                                while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
-                                {
-                                    const char* n = il2cpp_method_get_name(mm);
-                                    if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
-                                }
-                            }
-                            if (!m) return;
-                            void* fn = *(void**)m;
-                            if (!fn) return;
-                            PatchHelpers::PatchBoolGetter("UnlockLocations", fn, val);
-                            printf("[+] %s.%s patched %s => %s\n", nsName, className, il2cpp_method_get_name(m), val ? "true" : "false");
-                        };
-
-                    auto patchInt = [&](const char* name, int val)
-                        {
-                            const Il2CppMethod* m = FindMethodRecursive(locCls, name);
-                            if (!m)
-                            {
-                                void* it = nullptr;
-                                while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
-                                {
-                                    const char* n = il2cpp_method_get_name(mm);
-                                    if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
-                                }
-                            }
-                            if (!m) return;
-                            void* fn = *(void**)m;
-                            if (!fn) return;
-                            PatchHelpers::PatchIntGetter("UnlockLocations", fn, val);
-                            printf("[+] %s.%s patched %s => %d\n", nsName, className, il2cpp_method_get_name(m), val);
-                        };
-
-                    auto patchNullRet = [&](const char* name)
-                        {
-                            const Il2CppMethod* m = FindMethodRecursive(locCls, name);
-                            if (!m)
-                            {
-                                void* it = nullptr;
-                                while (const Il2CppMethod* mm = il2cpp_class_get_methods(locCls, &it))
-                                {
-                                    const char* n = il2cpp_method_get_name(mm);
-                                    if (n && std::string(n).find(name) != std::string::npos) { m = mm; break; }
-                                }
-                            }
-                            if (!m) return;
-                            void* fn = *(void**)m;
-                            if (!fn) return;
-                            const uint8_t code[2] = { 0x33, 0xC0 }; // xor eax,eax
-                            PatchHelpers::PatchBytes("UnlockLocations", fn, code, sizeof(code));
-                            printf("[+] %s.%s patched %s => null\n", nsName, className, il2cpp_method_get_name(m));
-                        };
-
-                    patchBool("get_Enabled", true);
-                    patchBool("get_Locked", false);
-                    patchBool("get_LockedByQuest", false);
-                    patchBool("get_DisabledForScav", false);
-                    patchBool("get_ForceOnlineRaidInPVE", false);
-                    patchBool("get_ForceOfflineRaidInPVE", true);
-                    patchInt("get_RequiredPlayerLevelMin", 1);
-                    patchInt("get_RequiredPlayerLevelMax", 100);
-                    patchInt("get_MinPlayerLvlAccessKeys", 0);
-                    patchNullRet("get_AccessKeys");
-                    return true;
+                    const Il2CppMethod* m = FindMethodRecursive(locSelectView, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    PatchHelpers::PatchBoolGetter("UnlockRoutes", fn, val);
+                    printf("[+] LocationSelectView.%s patched => %s\n", name, val ? "true" : "false");
                 };
 
-            if (!patchLocationClass("JsonType", "LocationSettings/Location"))
-            {
-                patchLocationClass("", "Location"); // fallback NoNamespace
-            }
-
-            printf("[+] Location unlock patches applied (PERMANENT)\n");
+            patchBool("get_IsAvailable", true);
+            patchBool("get_IsLocked", false);
+            patchBool("get_IsDiscovered", true);
         }
-        __except (EXCEPTION_EXECUTE_HANDLER)
+
+        // Patch TravelRoute (individual route/exit control)
+        Il2CppClass* travelRoute = (Il2CppClass*)il2cpp_class_from_name(image, "EFT.UI", "TravelRoute");
+        if (!travelRoute)
+            travelRoute = (Il2CppClass*)il2cpp_class_from_name(image, "", "TravelRoute");
+
+        if (travelRoute)
         {
-            printf("[-] EXCEPTION in ApplyUnlockLocations - game may be unstable\n");
-        }
-    }
+            auto patchBool = [&](const char* name, bool val)
+                {
+                    const Il2CppMethod* m = FindMethodRecursive(travelRoute, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    PatchHelpers::PatchBoolGetter("UnlockRoutes", fn, val);
+                    printf("[+] TravelRoute.%s patched => %s\n", name, val ? "true" : "false");
+                };
 
+            patchBool("get_IsAvailable", true);
+            patchBool("get_IsLocked", false);
+            patchBool("get_IsDiscovered", true);
+        }
+
+        // Patch LocationSettings (contains available routes list)
+        Il2CppClass* locSettings = (Il2CppClass*)il2cpp_class_from_name(image, "JsonType", "LocationSettings");
+        if (!locSettings)
+            locSettings = (Il2CppClass*)il2cpp_class_from_name(image, "", "LocationSettings");
+
+        if (locSettings)
+        {
+            auto patchRet = [&](const char* name)
+                {
+                    const Il2CppMethod* m = FindMethodRecursive(locSettings, name);
+                    if (!m) return;
+                    void* fn = *(void**)m;
+                    if (!fn) return;
+                    const uint8_t retOnly[1] = { 0xC3 };
+                    PatchHelpers::PatchBytes("UnlockRoutes", fn, retOnly, sizeof(retOnly));
+                    printf("[+] LocationSettings.%s patched => ret\n", name);
+                };
+
+            patchRet("ValidateRoutes");
+            patchRet("FilterUnavailableRoutes");
+        }
+
+        printf("[+] Route unlock patches applied\n");
+    }
+    /*
     void UpdateLocationRoutes(Il2CppImage* image)
     {
-        // DISABLED - This was causing crashes
-        // The one-time patches should be sufficient
+        // This was causing crashes because it was called every frame
+        // Now it's called once at startup via UnlockLocationRoutes
         return;
     }
+    */
 }
