@@ -11,6 +11,7 @@
 #include "Menu/Menu.h"
 #include "Menu/MenuRenderer.h"
 #include "Features/Features.h"
+#include "Core/LocationUnlock.h"
 #include "Core/IL2CPP_API.h"
 
 // =================================================================
@@ -382,7 +383,7 @@ void start()
     il2cpp_method_get_flags = (il2cpp_method_get_flags_prot)GetProcAddress(il2cpp, "il2cpp_method_get_flags");
 
     WriteLog("[*] Waiting 25 seconds for game to fully initialize...\n");
-    Sleep(25000);
+    Sleep(15000);
 
     Il2CppDomain* domain = il2cpp_get_root_domain();
     il2cpp_thread_attach(domain);
@@ -447,6 +448,14 @@ void start()
     WriteLog("\n[*] Step 6b: Initializing Item Spawner hook...\n");
     ItemSpawner::ProcessQueue(image);
 
+    WriteLog("\n[*] Step 6b: Applying permanent location unlock patches...\n");
+    LocationUnlock::ApplyUnlockLocations(image);
+    WriteLog("[+] All maps unlocked (Terminal, Labs, Streets, etc.)\n");
+
+    LocationUnlock::UpdateRaidSelectedLocation(image);
+
+
+
     Sleep(1000);
 
     // Initialize DX11 Hook
@@ -464,7 +473,6 @@ void start()
     Sleep(1000);
 
     // Clear console and show clean header
-    system("cls");
     WriteLog("========================================\n");
     WriteLog("  Tegridy Farms - Active\n");
     WriteLog("========================================\n\n");
@@ -578,8 +586,11 @@ void start()
             FeaturePatch::UpdateGodMode();
         }
 
-        // Update offline PVE (every frame, but only writes when location changes)
-        FeaturePatch::UpdateOfflinePVE();
+        LocationUnlock::UpdateRaidSelectedLocation(image);
+
+        LocationUnlock::UpdateLocationRoutes(image);
+
+
         // Keep ItemSpawner hook alive
         ItemSpawner::ProcessQueue(image);
 

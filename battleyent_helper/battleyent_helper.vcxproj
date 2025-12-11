@@ -162,6 +162,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Core\IL2CPP_API.cpp" />
+    <ClCompile Include="Core\LocationUnlock.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="Features\Features.cpp" />
     <ClCompile Include="Utils\iat_hook.cpp" />
@@ -177,6 +178,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Core\IL2CPP_API.h" />
+    <ClInclude Include="Core\LocationUnlock.h" />
     <ClInclude Include="Utils\DX11Hook.h" />
     <ClInclude Include="Features\Features.h" />
     <ClInclude Include="Utils\iat_hook.h" />
