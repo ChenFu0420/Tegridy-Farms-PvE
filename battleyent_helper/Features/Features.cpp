@@ -765,25 +765,53 @@ namespace FeaturePatch
 
     void UpdateOfflinePVE()
     {
-        if (!g_TarkovApplicationInstance) return;
+        __try
+        {
+            if (!g_TarkovApplicationInstance) return;
 
-        // Reference: Truth source offsets
-        // TarkovApplication + 0xD0 → RaidSettings
-        // RaidSettings + 0xA8 → SelectedLocation
-        // SelectedLocation + 0x32 → ForceOnlineRaid
-        // SelectedLocation + 0x33 → ForceOfflineRaid
+            // Check if memory is readable
+            MEMORY_BASIC_INFORMATION mbi = {};
+            if (!VirtualQuery(g_TarkovApplicationInstance, &mbi, sizeof(mbi)))
+                return;
 
-        uintptr_t raidSettings = *(uintptr_t*)((uintptr_t)g_TarkovApplicationInstance + 0xD0);
-        if (!raidSettings) return;
+            if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+                return;
 
-        uintptr_t selectedLocation = *(uintptr_t*)(raidSettings + 0xA8);
-        if (!selectedLocation || g_selectedLocation == selectedLocation) return;
+            uintptr_t raidSettings = *(uintptr_t*)((uintptr_t)g_TarkovApplicationInstance + 0xD0);
+            if (!raidSettings) return;
 
-        // Force offline PVE raid (permanent patch)
-        *(bool*)(selectedLocation + 0x32) = false;  // ForceOnlineRaid = false
-        *(bool*)(selectedLocation + 0x33) = true;   // ForceOfflineRaid = true
+            // Check if raidSettings is readable
+            if (!VirtualQuery((void*)raidSettings, &mbi, sizeof(mbi)))
+                return;
 
-        g_selectedLocation = selectedLocation;
+            if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+                return;
+
+            uintptr_t selectedLocation = *(uintptr_t*)(raidSettings + 0xA8);
+            if (!selectedLocation) return;
+
+            // Check if selectedLocation is readable
+            if (!VirtualQuery((void*)selectedLocation, &mbi, sizeof(mbi)))
+                return;
+
+            if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+                return;
+
+            // Force offline PVE raid
+            *(bool*)(selectedLocation + 0x32) = false;  // ForceOnlineRaid = false
+            *(bool*)(selectedLocation + 0x33) = true;   // ForceOfflineRaid = true
+
+            // Track for debugging
+            if (g_selectedLocation != selectedLocation)
+            {
+                g_selectedLocation = selectedLocation;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            // Silently fail - don't spam console
+            return;
+        }
     }
 
     // ========================================

@@ -11,7 +11,46 @@
 #include "Menu/Menu.h"
 #include "Menu/MenuRenderer.h"
 #include "Features/Features.h"
+#include "Core/LocationUnlock.h"
 #include "Core/IL2CPP_API.h"
+
+
+// for logs and config
+static char g_dllDirectory[MAX_PATH] = { 0 };
+
+void InitializeDllDirectory()
+{
+    if (g_dllDirectory[0] != 0)
+        return; // already initialized
+
+    HMODULE hModule = nullptr;
+    GetModuleHandleExA(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        (LPCSTR)&InitializeDllDirectory,
+        &hModule
+    );
+
+    char fullPath[MAX_PATH];
+    GetModuleFileNameA(hModule, fullPath, MAX_PATH);
+
+    // remove filename, keep directory
+    char* lastSlash = strrchr(fullPath, '\\');
+    if (lastSlash)
+    {
+        size_t len = lastSlash - fullPath + 1;
+        strncpy_s(g_dllDirectory, fullPath, len);
+        g_dllDirectory[len] = '\0';
+    }
+}
+
+
+const char* GetDllDirectory()
+{
+    if (g_dllDirectory[0] == 0)
+        InitializeDllDirectory();
+    return g_dllDirectory;
+}
+
 
 // =================================================================
 // 0. Logging System
@@ -44,26 +83,18 @@ void WriteLog(const char* format, ...)
 
 void InitLogging()
 {
-    // Get DLL directory
-    char dllPath[MAX_PATH];
-    HMODULE hModule = nullptr;
-    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        (LPCSTR)&InitLogging, &hModule);
-    GetModuleFileNameA(hModule, dllPath, MAX_PATH);
+    InitializeDllDirectory(); // ensure directory available
 
-    // Replace DLL name with log.txt
-    char* lastSlash = strrchr(dllPath, '\\');
-    if (lastSlash)
-    {
-        strcpy_s(lastSlash + 1, MAX_PATH - (lastSlash - dllPath + 1), "log.txt");
-    }
+    char logPath[MAX_PATH];
+    snprintf(logPath, MAX_PATH, "%slog.txt", GetDllDirectory());
 
-    g_logFile = fopen(dllPath, "w");
+    g_logFile = fopen(logPath, "w");
     if (g_logFile)
     {
-        WriteLog("[+] Logging initialized: %s\n", dllPath);
+        WriteLog("[+] Logging initialized: %s\n", logPath);
     }
 }
+
 
 void CloseLogging()
 {
@@ -294,6 +325,45 @@ void* get_camera_manager_instance(Il2CppImage* image)
     return nullptr;
 }
 
+// CFG FILE FOR THE SLEEP, WILL PROBABLY UTILIZE IT FOR MORE LATER
+
+int LoadInitDelaySeconds()
+{
+    InitializeDllDirectory();
+
+    char cfgPath[MAX_PATH];
+    snprintf(cfgPath, MAX_PATH, "%sconfig.ini", GetDllDirectory());
+
+    // If file does NOT exist → create with default 25
+    if (GetFileAttributesA(cfgPath) == INVALID_FILE_ATTRIBUTES)
+    {
+        FILE* f = fopen(cfgPath, "w");
+        if (f)
+        {
+            fprintf(f, "init_delay_seconds=25\n");
+            fclose(f);
+        }
+        return 25;
+    }
+
+    // Read existing file
+    FILE* f = fopen(cfgPath, "r");
+    if (!f) return 25;
+
+    int delay = 25;
+    fscanf_s(f, "init_delay_seconds=%d", &delay);
+    fclose(f);
+
+    if (delay < 1) delay = 1;
+    if (delay > 120) delay = 120;
+
+    return delay;
+}
+
+
+
+
+
 // =================================================================
 // 6. Main Execution
 // =================================================================
@@ -363,8 +433,6 @@ void start()
     il2cpp_assembly_get_image = (il2cpp_assembly_get_image_prot)GetProcAddress(il2cpp, "il2cpp_assembly_get_image");
     il2cpp_image_get_name = (il2cpp_image_get_name_prot)GetProcAddress(il2cpp, "il2cpp_image_get_name");
     il2cpp_runtime_invoke = (il2cpp_runtime_invoke_prot)GetProcAddress(il2cpp, "il2cpp_runtime_invoke");
-
-    // Additional IL2CPP functions for AI Vacuum
     il2cpp_object_get_class = (il2cpp_object_get_class_prot)GetProcAddress(il2cpp, "il2cpp_object_get_class");
     il2cpp_class_get_type = (il2cpp_class_get_type_prot)GetProcAddress(il2cpp, "il2cpp_class_get_type");
     il2cpp_type_get_object = (il2cpp_type_get_object_prot)GetProcAddress(il2cpp, "il2cpp_type_get_object");
@@ -377,12 +445,10 @@ void start()
     il2cpp_string_new = (il2cpp_string_new_prot)GetProcAddress(il2cpp, "il2cpp_string_new");
     il2cpp_method_get_flags = (il2cpp_method_get_flags_prot)GetProcAddress(il2cpp, "il2cpp_method_get_flags");
 
-    // Additional IL2CPP functions for Item spawning 
-    il2cpp_string_new = (il2cpp_string_new_prot)GetProcAddress(il2cpp, "il2cpp_string_new");
-    il2cpp_method_get_flags = (il2cpp_method_get_flags_prot)GetProcAddress(il2cpp, "il2cpp_method_get_flags");
+    int initDelay = LoadInitDelaySeconds();
 
-    WriteLog("[*] Waiting 25 seconds for game to fully initialize...\n");
-    Sleep(25000);
+    WriteLog("[*] Waiting %d seconds for game to fully initialize...\n", initDelay);
+    Sleep(initDelay * 1000);
 
     Il2CppDomain* domain = il2cpp_get_root_domain();
     il2cpp_thread_attach(domain);
@@ -443,9 +509,14 @@ void start()
     // Initialize all feature patches (create them, don't enable yet)
     WriteLog("\n[*] Step 6: Initializing feature patches...\n");
     FeaturePatch::InitializeAllPatches(image);
+
     // Initialize Item Spawner InitLevel hook
     WriteLog("\n[*] Step 6b: Initializing Item Spawner hook...\n");
     ItemSpawner::ProcessQueue(image);
+
+    // CRITICAL: Apply location unlock patches ONCE at startup
+    WriteLog("\n[*] Step 6c: Applying permanent location unlock patches...\n");
+    LocationUnlock::ApplyUnlockLocations(image);
 
     Sleep(1000);
 
@@ -462,10 +533,9 @@ void start()
     }
 
     Sleep(1000);
-
-    // Clear console and show clean header
     system("cls");
-    WriteLog("========================================\n");
+    // Clear console and show clean header
+    WriteLog("\n========================================\n");
     WriteLog("  Tegridy Farms - Active\n");
     WriteLog("========================================\n\n");
     WriteLog("[INFO] Press INSERT to open menu\n");
@@ -529,36 +599,25 @@ void start()
             (Features::breach_all_doors != prev_breach_all_doors) ||
             (Features::lucky_search != prev_lucky_search);
 
-        // Apply features when CameraManager exists and (first time OR features changed)
-
-
-
-
-        // THIS IS NOT GUD, THE OR SHOULD NOT BE THERE, IT SHOULD BE AND SO &&
-        /*
-        if (cm && (!patchesInitialized || featuresChanged))
-        {
-            if (!patchesInitialized)
-            {
-                WriteLog("[*] Game ready - features can now be toggled via menu\n\n");
-                patchesInitialized = true;
-            }
-
-            // Apply all enabled features
-            FeaturePatch::ApplyAllEnabledFeatures(image);
-            */
-
+        // Initialize patches when CameraManager exists (game is ready)
         if (cm && !patchesInitialized)
         {
             WriteLog("[*] Game ready - features can now be toggled via menu\n\n");
+            printf("[+] Location unlock patches applied (PERMANENT)\n");
+            printf("[!] Instructions:\n");
+            printf("[!] 2. Go to raid selection - you should see all locations\n");
+            printf("[!] 3. If 'Next' button isn't visible, click on any map, click Next and then go Back \n");
+            printf("[!] 5. DLC locations (Town, Suburbs) will NOT load - they're not in the game files\n");
+            printf("[!] 6. Terminal will load infinitely - the mission doesn't exists\n");
+            printf("[!] 7. Ground Zero (the tutorial one) will invalidate raid\n");
+            printf("[!] 8. If you have a route undiscovered, you won't be able to load in! (Labirynth is always unlocked)\n");
             patchesInitialized = true;
         }
 
+        // Apply feature changes only when initialized AND something changed
         if (cm && patchesInitialized && featuresChanged)
         {
             FeaturePatch::ApplyAllEnabledFeatures(image);
-
-
 
             // Update previous states
             prev_god_mode = Features::god_mode;
@@ -578,8 +637,13 @@ void start()
             FeaturePatch::UpdateGodMode();
         }
 
-        // Update offline PVE (every frame, but only writes when location changes)
-        FeaturePatch::UpdateOfflinePVE();
+        // CRITICAL: Update selected location when TarkovApplication is ready
+        // This monitors for location changes and applies unlock + offline flags
+        if (g_TarkovApplicationInstance)
+        {
+            LocationUnlock::UpdateRaidSelectedLocation(image);
+        }
+
         // Keep ItemSpawner hook alive
         ItemSpawner::ProcessQueue(image);
 
@@ -596,7 +660,7 @@ void start()
 }
 
 // =================================================================
-// 7. DLL Entry Point - UPDATED WITH IAT HOOK
+// 7. DLL Entry Point
 // =================================================================
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
@@ -605,10 +669,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID)
     {
         DisableThreadLibraryCalls(hModule);
 
-        // ========================================
-        // CRITICAL: Install IAT Hook for BEService bypass
-        // This is INSTANT - no thread freezing, no retries
-        // ========================================
+        // Install IAT Hook for BEService bypass
         InstallBEServiceBypass();
 
         // Start main thread
